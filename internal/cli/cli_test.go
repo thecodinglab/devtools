@@ -55,6 +55,7 @@ func TestShortWorktreeCommandInfersProjectFromCurrentDirectory(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
+	clearFile(t, log)
 	if code := Run([]string{"w", "feature/cli"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("w returned %d, stderr=%s", code, stderr.String())
 	}
@@ -172,12 +173,95 @@ func TestSwitchAmbiguousQueryUsesPickerWithMatches(t *testing.T) {
 	}
 }
 
+func TestRemoveSwitchesToMainSessionBeforeRemovingFeature(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	log := installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"w", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("w returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	changeCwd(t, featurePath)
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	clearFile(t, log)
+	stdout.Reset()
+	stderr.Reset()
+
+	if code := Run([]string{"rm", "--force"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("rm returned %d, stderr=%s", code, stderr.String())
+	}
+	wantRemoved := featurePath
+	if strings.TrimSpace(stdout.String()) != wantRemoved {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), wantRemoved)
+	}
+	if _, err := os.Stat(featurePath); !os.IsNotExist(err) {
+		t.Fatalf("expected feature worktree to be removed, err=%v", err)
+	}
+	got := tmuxCommands(t, log)
+	want := []string{
+		"has-session -t widgets-main",
+		"switch-client -t widgets-main",
+		"has-session -t widgets-feature-test",
+		"kill-session -t widgets-feature-test",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("tmux commands = %#v, want %#v", got, want)
+	}
+}
+
+func TestRemoveMainDetachesBeforeRemovingSession(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	log := installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	clearFile(t, log)
+	stdout.Reset()
+	stderr.Reset()
+
+	if code := Run([]string{"rm", "--allow-main", "--force", "--keep-branch"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("rm returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != mainPath {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), mainPath)
+	}
+	if _, err := os.Stat(mainPath); !os.IsNotExist(err) {
+		t.Fatalf("expected main worktree to be removed, err=%v", err)
+	}
+	got := tmuxCommands(t, log)
+	want := []string{
+		"detach-client",
+		"has-session -t widgets-main",
+		"kill-session -t widgets-main",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("tmux commands = %#v, want %#v", got, want)
+	}
+}
+
 func installFakeTmux(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()
 	log := filepath.Join(t.TempDir(), "tmux.log")
 	fakeTmux := filepath.Join(bin, "tmux")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TMUX_LOG\"\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +269,40 @@ func installFakeTmux(t *testing.T) string {
 	t.Setenv("TMUX_LOG", log)
 	t.Setenv("TMUX", "")
 	return log
+}
+
+func changeCwd(t *testing.T, dir string) {
+	t.Helper()
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(originalCwd)
+	})
+}
+
+func clearFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func tmuxCommands(t *testing.T, log string) []string {
+	t.Helper()
+	out, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil
+	}
+	return lines
 }
 
 func installFakeFZF(t *testing.T, selection string) string {

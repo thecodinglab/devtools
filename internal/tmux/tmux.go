@@ -43,6 +43,24 @@ func Switch(dir, session string) error {
 	return run("tmux", "switch-client", "-t", session)
 }
 
+func CloseForRemoval(targetSession, fallbackSession, fallbackDir string) error {
+	if os.Getenv("TMUX") != "" {
+		if targetSession == fallbackSession {
+			if err := run("tmux", "detach-client"); err != nil {
+				return err
+			}
+		} else {
+			if err := Switch(fallbackDir, fallbackSession); err != nil {
+				return err
+			}
+		}
+	}
+	if hasSession(targetSession) {
+		return run("tmux", "kill-session", "-t", targetSession)
+	}
+	return nil
+}
+
 func hasSession(session string) bool {
 	err := run("tmux", "has-session", "-t", session)
 	return err == nil

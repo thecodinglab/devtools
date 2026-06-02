@@ -27,6 +27,11 @@ type RemoveOptions struct {
 	AllowMain    bool
 }
 
+type removePlan struct {
+	result Result
+	branch string
+}
+
 func InitProject(root, projectName string) (Result, error) {
 	if err := validateName(projectName, "project"); err != nil {
 		return Result{}, err
@@ -111,47 +116,13 @@ func AddWorktree(root, project, branch, startPoint string) (Result, error) {
 }
 
 func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result, error) {
-	if err := validateName(project, "project"); err != nil {
-		return Result{}, err
-	}
-	if worktree == "" {
-		return Result{}, errors.New("worktree name must not be empty")
-	}
-	projectPath := filepath.Join(root, project)
-	barePath := filepath.Join(projectPath, bareDirName)
-	if !exists(barePath) {
-		return Result{}, fmt.Errorf("bare repository not found: %s", barePath)
-	}
-	worktreeName := WorktreeName(worktree)
-	if !opts.AllowMain && (worktreeName == "main" || worktreeName == "master") {
-		return Result{}, fmt.Errorf("refusing to remove %s worktree without --allow-main", worktreeName)
-	}
-	worktreePath := filepath.Join(projectPath, worktreeName)
-	if !exists(worktreePath) {
-		return Result{}, fmt.Errorf("worktree not found: %s", worktreePath)
-	}
-	branch, err := branchForWorktree(worktreePath)
+	plan, err := planRemoveWorktree(root, project, worktree, opts)
 	if err != nil {
 		return Result{}, err
 	}
-	if branch == "" {
-		return Result{}, fmt.Errorf("could not detect branch for %s", worktreePath)
-	}
-	if !opts.AllowMain && (branch == "main" || branch == "master") {
-		return Result{}, fmt.Errorf("refusing to remove %s branch without --allow-main", branch)
-	}
-	if !opts.Force {
-		clean, err := isClean(worktreePath)
-		if err != nil {
-			return Result{}, err
-		}
-		if !clean {
-			return Result{}, errors.New("worktree has uncommitted changes; pass --force to remove anyway")
-		}
-		if err := isPushed(worktreePath); err != nil {
-			return Result{}, err
-		}
-	}
+	barePath := plan.result.BarePath
+	worktreePath := plan.result.WorktreePath
+
 	args := []string{"worktree", "remove"}
 	if opts.Force {
 		args = append(args, "--force")
@@ -160,8 +131,8 @@ func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result,
 	if err := gitBare(barePath, args...); err != nil {
 		return Result{}, err
 	}
-	if opts.DeleteBranch && branch != "" {
-		deleteArgs := []string{"branch", "-D", branch}
+	if opts.DeleteBranch && plan.branch != "" {
+		deleteArgs := []string{"branch", "-D", plan.branch}
 		if err := gitBare(barePath, deleteArgs...); err != nil {
 			return Result{}, err
 		}
@@ -169,7 +140,61 @@ func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result,
 	if err := gitBare(barePath, "worktree", "prune"); err != nil {
 		return Result{}, err
 	}
-	return Result{Project: project, Worktree: worktreeName, ProjectPath: projectPath, BarePath: barePath, WorktreePath: worktreePath}, nil
+	return plan.result, nil
+}
+
+func PlanRemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result, error) {
+	plan, err := planRemoveWorktree(root, project, worktree, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	return plan.result, nil
+}
+
+func planRemoveWorktree(root, project, worktree string, opts RemoveOptions) (removePlan, error) {
+	if err := validateName(project, "project"); err != nil {
+		return removePlan{}, err
+	}
+	if worktree == "" {
+		return removePlan{}, errors.New("worktree name must not be empty")
+	}
+	projectPath := filepath.Join(root, project)
+	barePath := filepath.Join(projectPath, bareDirName)
+	if !exists(barePath) {
+		return removePlan{}, fmt.Errorf("bare repository not found: %s", barePath)
+	}
+	worktreeName := WorktreeName(worktree)
+	if !opts.AllowMain && (worktreeName == "main" || worktreeName == "master") {
+		return removePlan{}, fmt.Errorf("refusing to remove %s worktree without --allow-main", worktreeName)
+	}
+	worktreePath := filepath.Join(projectPath, worktreeName)
+	if !exists(worktreePath) {
+		return removePlan{}, fmt.Errorf("worktree not found: %s", worktreePath)
+	}
+	branch, err := branchForWorktree(worktreePath)
+	if err != nil {
+		return removePlan{}, err
+	}
+	if branch == "" {
+		return removePlan{}, fmt.Errorf("could not detect branch for %s", worktreePath)
+	}
+	if !opts.AllowMain && (branch == "main" || branch == "master") {
+		return removePlan{}, fmt.Errorf("refusing to remove %s branch without --allow-main", branch)
+	}
+	if !opts.Force {
+		clean, err := isClean(worktreePath)
+		if err != nil {
+			return removePlan{}, err
+		}
+		if !clean {
+			return removePlan{}, errors.New("worktree has uncommitted changes; pass --force to remove anyway")
+		}
+		if err := isPushed(worktreePath); err != nil {
+			return removePlan{}, err
+		}
+	}
+	result := Result{Project: project, Worktree: worktreeName, ProjectPath: projectPath, BarePath: barePath, WorktreePath: worktreePath}
+	return removePlan{result: result, branch: branch}, nil
 }
 
 func InferProject(root, cwd string) (string, error) {

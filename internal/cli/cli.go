@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"devtools/internal/devgit"
 	"devtools/internal/discovery"
@@ -44,9 +46,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return newProjectCmd(g, rest[1:], stdout)
 	case "migrate":
 		return migrateCmd(g, rest[1:], stdout)
-	case "w":
+	case "work":
 		return newWorktreeCmd(g, rest[1:], stdout)
-	case "rm", "done":
+	case "done":
 		return removeWorktreeCmd(g, rest[1:], stdout)
 	case "list":
 		return listCmd(g, rest[1:], stdout)
@@ -248,16 +250,55 @@ func removeWorktreeCmd(g globals, args []string, stdout io.Writer) error {
 	if fs.NArg() == 1 {
 		worktree = fs.Arg(0)
 	}
-	result, err := devgit.RemoveWorktree(g.root, project, worktree, devgit.RemoveOptions{
+	opts := devgit.RemoveOptions{
 		Force:        *force,
 		DeleteBranch: !*keepBranch,
 		AllowMain:    *allowMain,
-	})
+	}
+	plan, err := devgit.PlanRemoveWorktree(g.root, project, worktree, opts)
+	if err != nil {
+		return err
+	}
+	fallbackWorktree, fallbackPath := removalFallback(g.root, project, plan.Worktree)
+	restoreHangup := ignoreHangup()
+	defer restoreHangup()
+	if err := tmux.CloseForRemoval(
+		tmux.SessionName(plan.Project, plan.Worktree),
+		tmux.SessionName(plan.Project, fallbackWorktree),
+		fallbackPath,
+	); err != nil {
+		return err
+	}
+	result, err := devgit.RemoveWorktree(g.root, project, worktree, opts)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(stdout, result.WorktreePath)
 	return nil
+}
+
+func ignoreHangup() func() {
+	wasIgnored := signal.Ignored(syscall.SIGHUP)
+	signal.Ignore(syscall.SIGHUP)
+	return func() {
+		if !wasIgnored {
+			signal.Reset(syscall.SIGHUP)
+		}
+	}
+}
+
+func removalFallback(root, project, removingWorktree string) (string, string) {
+	projectPath := filepath.Join(root, project)
+	if removingWorktree == "main" || removingWorktree == "master" {
+		return removingWorktree, filepath.Join(projectPath, removingWorktree)
+	}
+	for _, worktree := range []string{"main", "master"} {
+		path := filepath.Join(projectPath, worktree)
+		if stat, err := os.Stat(path); err == nil && stat.IsDir() {
+			return worktree, path
+		}
+	}
+	return removingWorktree, filepath.Join(projectPath, removingWorktree)
 }
 
 func listCmd(g globals, args []string, stdout io.Writer) error {
