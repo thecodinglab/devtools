@@ -32,7 +32,34 @@ func TestSwitchUsesFakeTmuxForNormalRepo(t *testing.T) {
 	}
 }
 
-func TestShortWorktreeCommandInfersProjectFromCurrentDirectory(t *testing.T) {
+func TestListAcceptsRootPersistentFlag(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "small")
+	makeRepo(t, project)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"list", "--root", root}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
+	}
+	want := "small\t" + project
+	if strings.TrimSpace(stdout.String()) != want {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), want)
+	}
+}
+
+func TestShortWorkAndRemoveAliasesAreNotRegistered(t *testing.T) {
+	for _, name := range []string{"w", "rm"} {
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{name}, &stdout, &stderr); code == 0 {
+			t.Fatalf("%s returned success, stdout=%s", name, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "unknown command") {
+			t.Fatalf("%s stderr = %q, want unknown command", name, stderr.String())
+		}
+	}
+}
+
+func TestWorkCommandInfersProjectFromCurrentDirectory(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
 	log := installFakeTmux(t)
@@ -56,8 +83,8 @@ func TestShortWorktreeCommandInfersProjectFromCurrentDirectory(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	clearFile(t, log)
-	if code := Run([]string{"w", "feature/cli"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("w returned %d, stderr=%s", code, stderr.String())
+	if code := Run([]string{"work", "feature/cli"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
 	}
 	want := filepath.Join(root, "widgets", "feature-cli")
 	if strings.TrimSpace(stdout.String()) != want {
@@ -187,8 +214,8 @@ func TestRemoveSwitchesToMainSessionBeforeRemovingFeature(t *testing.T) {
 	changeCwd(t, mainPath)
 	stdout.Reset()
 	stderr.Reset()
-	if code := Run([]string{"w", "feature/test"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("w returned %d, stderr=%s", code, stderr.String())
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
 	}
 	featurePath := filepath.Join(root, "widgets", "feature-test")
 	changeCwd(t, featurePath)
@@ -197,8 +224,8 @@ func TestRemoveSwitchesToMainSessionBeforeRemovingFeature(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 
-	if code := Run([]string{"rm", "--force"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("rm returned %d, stderr=%s", code, stderr.String())
+	if code := Run([]string{"done", "--force"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("done returned %d, stderr=%s", code, stderr.String())
 	}
 	wantRemoved := featurePath
 	if strings.TrimSpace(stdout.String()) != wantRemoved {
@@ -236,8 +263,8 @@ func TestRemoveMainDetachesBeforeRemovingSession(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 
-	if code := Run([]string{"rm", "--allow-main", "--force", "--keep-branch"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("rm returned %d, stderr=%s", code, stderr.String())
+	if code := Run([]string{"done", "--allow-main", "--force", "--keep-branch"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("done returned %d, stderr=%s", code, stderr.String())
 	}
 	if strings.TrimSpace(stdout.String()) != mainPath {
 		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), mainPath)
