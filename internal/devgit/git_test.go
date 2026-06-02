@@ -1,0 +1,191 @@
+package devgit
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestProjectNameFromURL(t *testing.T) {
+	tests := map[string]string{
+		"https://github.com/acme/widgets.git": "widgets",
+		"git@github.com:acme/widgets.git":     "widgets",
+		"ssh://git@example.com/acme/tool":     "tool",
+		"/tmp/local/repo.git":                 "repo",
+	}
+	for input, want := range tests {
+		if got := ProjectNameFromURL(input); got != want {
+			t.Fatalf("ProjectNameFromURL(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestWorktreeName(t *testing.T) {
+	tests := map[string]string{
+		"main":                    "main",
+		"origin/main":             "main",
+		"refs/heads/feature/test": "feature-test",
+		"feature/nested/branch":   "feature-nested-branch",
+	}
+	for input, want := range tests {
+		if got := WorktreeName(input); got != want {
+			t.Fatalf("WorktreeName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestCloneCreatesBareRepoAndMainWorktree(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+
+	result, err := Clone(root, remote, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Worktree != "main" {
+		t.Fatalf("worktree = %q, want main", result.Worktree)
+	}
+	assertExists(t, filepath.Join(root, "widgets", ".bare", "HEAD"))
+	assertExists(t, filepath.Join(root, "widgets", "main", "README.md"))
+
+	fetch := gitOut(t, filepath.Join(root, "widgets"), "--git-dir", filepath.Join(root, "widgets", ".bare"), "config", "--get-all", "remote.origin.fetch")
+	if strings.TrimSpace(fetch) != "+refs/heads/*:refs/remotes/origin/*" {
+		t.Fatalf("unexpected fetch refspec: %q", fetch)
+	}
+}
+
+func TestMigratePreservesCheckoutAsDefaultWorktree(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	repo := filepath.Join(root, "widgets")
+	gitCmd(t, root, "clone", remote, repo)
+	gitCmd(t, repo, "config", "commit.gpgsign", "false")
+
+	result, err := Migrate(repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWorktree, err := filepath.EvalSymlinks(filepath.Join(repo, "main"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.WorktreePath != wantWorktree {
+		t.Fatalf("worktree path = %q", result.WorktreePath)
+	}
+	assertExists(t, filepath.Join(repo, ".bare", "HEAD"))
+	assertExists(t, filepath.Join(repo, "main", "README.md"))
+	if _, err := os.Stat(filepath.Join(repo, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("expected original .git path to be gone, err=%v", err)
+	}
+	status := gitOut(t, filepath.Join(repo, "main"), "status", "--porcelain")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("migrated worktree is dirty:\n%s", status)
+	}
+	list := gitOut(t, repo, "--git-dir", filepath.Join(repo, ".bare"), "worktree", "list", "--porcelain")
+	if !strings.Contains(list, "worktree "+result.WorktreePath) {
+		t.Fatalf("worktree list missing preserved checkout:\n%s", list)
+	}
+}
+
+func TestAddWorktreeCreatesBranchDirectory(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Worktree != "feature-test" {
+		t.Fatalf("worktree = %q, want feature-test", result.Worktree)
+	}
+	assertExists(t, filepath.Join(root, "widgets", "feature-test", "README.md"))
+}
+
+func TestRemoveWorktreeRequiresPushedBranchAndDeletesLocalBranch(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, added.WorktreePath, "push", "-u", "origin", "feature/test")
+
+	removed, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{DeleteBranch: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.WorktreePath != added.WorktreePath {
+		t.Fatalf("removed path = %q, want %q", removed.WorktreePath, added.WorktreePath)
+	}
+	if _, err := os.Stat(added.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("expected worktree to be removed, err=%v", err)
+	}
+	if _, err := gitOutputBare(filepath.Join(root, "widgets", ".bare"), "show-ref", "--verify", "--quiet", "refs/heads/feature/test"); err == nil {
+		t.Fatal("expected local branch to be deleted")
+	}
+}
+
+func TestRemoveWorktreeRejectsUnpushedBranch(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddWorktree(root, "widgets", "feature/test", "main"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{DeleteBranch: true})
+	if err == nil || !strings.Contains(err.Error(), "no upstream") {
+		t.Fatalf("expected no upstream error, got %v", err)
+	}
+}
+
+func createRemote(t *testing.T, branch string) string {
+	t.Helper()
+	base := t.TempDir()
+	src := filepath.Join(base, "src")
+	remote := filepath.Join(base, "remote.git")
+	gitCmd(t, base, "init", "-b", branch, src)
+	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, src, "add", "README.md")
+	gitCmd(t, src, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "init")
+	gitCmd(t, base, "clone", "--bare", src, remote)
+	return remote
+}
+
+func assertExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected %s to exist: %v", path, err)
+	}
+}
+
+func gitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return string(out)
+}
