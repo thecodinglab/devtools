@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -117,9 +116,19 @@ func isGitDir(path string) bool {
 }
 
 func isWorktree(path string) bool {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree")
-	out, err := cmd.Output()
-	return err == nil && strings.TrimSpace(string(out)) == "true"
+	gitPath := filepath.Join(path, ".git")
+	stat, err := os.Stat(gitPath)
+	if err != nil {
+		return false
+	}
+	if stat.IsDir() {
+		return exists(filepath.Join(gitPath, "HEAD"))
+	}
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(data)), "gitdir:")
 }
 
 func exists(path string) bool {

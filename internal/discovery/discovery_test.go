@@ -20,6 +20,7 @@ func TestScanFindsNormalReposAndBareWorktrees(t *testing.T) {
 	}
 	gitCmd(t, bareProject, "init", "--bare", ".bare")
 	makeRepo(t, main)
+	t.Setenv("PATH", filepath.Join(root, "missing-bin"))
 
 	targets, err := Scan(root)
 	if err != nil {
@@ -27,6 +28,35 @@ func TestScanFindsNormalReposAndBareWorktrees(t *testing.T) {
 	}
 	got := labels(targets)
 	want := "small,widgets/main"
+	if got != want {
+		t.Fatalf("labels = %q, want %q", got, want)
+	}
+}
+
+func TestScanFindsLinkedWorktreeGitFiles(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "widgets")
+	bare := filepath.Join(project, ".bare")
+	feature := filepath.Join(project, "feature")
+	if err := os.MkdirAll(filepath.Join(bare, "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bare, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(feature, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(feature, ".git"), []byte("gitdir: ../.bare/worktrees/feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	targets, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := labels(targets)
+	want := "widgets/feature"
 	if got != want {
 		t.Fatalf("labels = %q, want %q", got, want)
 	}
