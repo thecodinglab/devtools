@@ -37,7 +37,7 @@
             version = "0.1.0";
 
             src = self;
-            vendorHash = null;
+            vendorHash = "sha256-7K17JaXFsjf163g5PXCb5ng2gYdotnZ2IDKk8KFjNj0=";
 
             subPackages = [ "cmd/devtools" ];
 
@@ -73,7 +73,7 @@
             version = "0.1.0";
 
             src = self;
-            vendorHash = null;
+            vendorHash = "sha256-7K17JaXFsjf163g5PXCb5ng2gYdotnZ2IDKk8KFjNj0=";
 
             doCheck = true;
             nativeCheckInputs = [
