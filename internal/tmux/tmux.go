@@ -33,7 +33,7 @@ func SessionName(project, worktree string) string {
 
 func Switch(dir, session string) error {
 	if os.Getenv("TMUX") == "" {
-		return run("tmux", "new-session", "-A", "-s", session, "-c", dir)
+		return runAttached("tmux", "new-session", "-A", "-s", session, "-c", dir)
 	}
 	if !hasSession(session) {
 		if err := run("tmux", "new-session", "-d", "-s", session, "-c", dir); err != nil {
@@ -64,6 +64,17 @@ func CloseForRemoval(targetSession, fallbackSession, fallbackDir string) error {
 func hasSession(session string) bool {
 	err := run("tmux", "has-session", "-t", session)
 	return err == nil
+}
+
+func runAttached(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), err)
+	}
+	return nil
 }
 
 func run(name string, args ...string) error {
