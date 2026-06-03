@@ -195,6 +195,94 @@ func TestStatusReportsDirtyAheadBehindAndUpstream(t *testing.T) {
 	}
 }
 
+func TestUpdateMainWorktreeFetchesAndFastForwards(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	result, err := Clone(root, remote, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitCmd(t, filepath.Dir(clone), "clone", remote, clone)
+	if err := os.WriteFile(filepath.Join(clone, "remote.txt"), []byte("remote\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, clone, "add", "remote.txt")
+	gitCmd(t, clone, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "remote")
+	gitCmd(t, clone, "push", "origin", "main")
+
+	updated, err := UpdateMainWorktree(root, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.WorktreePath != result.WorktreePath {
+		t.Fatalf("updated path = %q, want %q", updated.WorktreePath, result.WorktreePath)
+	}
+	assertExists(t, filepath.Join(result.WorktreePath, "remote.txt"))
+}
+
+func TestPushCurrentSetsUpstreamWhenMissing(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(added.WorktreePath, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, added.WorktreePath, "add", "feature.txt")
+	gitCmd(t, added.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feature")
+
+	result, err := PushCurrent(added.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Branch != "feature/test" || result.Upstream != "origin/feature/test" {
+		t.Fatalf("push result = %#v", result)
+	}
+	upstream := gitOut(t, added.WorktreePath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if strings.TrimSpace(upstream) != "origin/feature/test" {
+		t.Fatalf("upstream = %q, want origin/feature/test", strings.TrimSpace(upstream))
+	}
+}
+
+func TestRebaseCurrentRebasesOntoTarget(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	cloned, err := Clone(root, remote, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, "main.txt"), []byte("main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, cloned.WorktreePath, "add", "main.txt")
+	gitCmd(t, cloned.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "main")
+	if err := os.WriteFile(filepath.Join(added.WorktreePath, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, added.WorktreePath, "add", "feature.txt")
+	gitCmd(t, added.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feature")
+
+	if err := RebaseCurrent(added.WorktreePath, "main"); err != nil {
+		t.Fatal(err)
+	}
+	mergeBase := strings.TrimSpace(gitOut(t, added.WorktreePath, "merge-base", "HEAD", "main"))
+	mainHead := strings.TrimSpace(gitOut(t, cloned.WorktreePath, "rev-parse", "HEAD"))
+	if mergeBase != mainHead {
+		t.Fatalf("merge-base = %s, want main HEAD %s", mergeBase, mainHead)
+	}
+}
+
 func createRemote(t *testing.T, branch string) string {
 	t.Helper()
 	base := t.TempDir()

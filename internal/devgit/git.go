@@ -35,6 +35,11 @@ type MergeResult struct {
 	Branch           string
 }
 
+type PushResult struct {
+	Branch   string
+	Upstream string
+}
+
 type WorktreeStatus struct {
 	Branch      string
 	Detached    bool
@@ -205,6 +210,79 @@ func MergeWorktreeToMain(root, project, worktree string) (MergeResult, error) {
 	}, nil
 }
 
+func MainBranch(root, project string) (string, error) {
+	worktree, _, err := mainWorktree(root, project)
+	return worktree, err
+}
+
+func UpdateMainWorktree(root, project string) (Result, error) {
+	projectPath := filepath.Join(root, project)
+	barePath := filepath.Join(projectPath, bareDirName)
+	if !exists(barePath) {
+		return Result{}, fmt.Errorf("bare repository not found: %s", barePath)
+	}
+	if err := gitBare(barePath, "fetch", "--prune", "origin"); err != nil {
+		return Result{}, err
+	}
+	worktree, worktreePath, err := mainWorktree(root, project)
+	if err != nil {
+		return Result{}, err
+	}
+	clean, err := isClean(worktreePath)
+	if err != nil {
+		return Result{}, err
+	}
+	if !clean {
+		return Result{}, errors.New("main worktree has uncommitted changes; commit or stash them before updating")
+	}
+	status, err := Status(worktreePath)
+	if err != nil {
+		return Result{}, err
+	}
+	if !status.HasUpstream {
+		return Result{}, fmt.Errorf("%s has no upstream", status.Branch)
+	}
+	if err := git(worktreePath, "merge", "--ff-only", status.Upstream); err != nil {
+		return Result{}, err
+	}
+	return Result{Project: project, Worktree: worktree, ProjectPath: projectPath, BarePath: barePath, WorktreePath: worktreePath}, nil
+}
+
+func PushCurrent(path string) (PushResult, error) {
+	branch, err := currentBranch(path)
+	if err != nil {
+		return PushResult{}, err
+	}
+	if branch == "" {
+		return PushResult{}, errors.New("cannot push detached HEAD")
+	}
+	upstream, err := currentUpstream(path)
+	if err != nil {
+		if err := git(path, "push", "-u", "origin", branch); err != nil {
+			return PushResult{}, err
+		}
+		return PushResult{Branch: branch, Upstream: "origin/" + branch}, nil
+	}
+	if err := git(path, "push"); err != nil {
+		return PushResult{}, err
+	}
+	return PushResult{Branch: branch, Upstream: upstream}, nil
+}
+
+func RebaseCurrent(path, onto string) error {
+	if onto == "" {
+		onto = "main"
+	}
+	clean, err := isClean(path)
+	if err != nil {
+		return err
+	}
+	if !clean {
+		return errors.New("worktree has uncommitted changes; commit or stash them before rebasing")
+	}
+	return git(path, "rebase", onto)
+}
+
 func PlanRemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result, error) {
 	plan, err := planRemoveWorktree(root, project, worktree, opts)
 	if err != nil {
@@ -364,9 +442,9 @@ func Status(path string) (WorktreeStatus, error) {
 	status.Changes = len(lines)
 	status.Dirty = status.Changes > 0
 
-	upstream, err := gitOutput(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	upstream, err := currentUpstream(path)
 	if err == nil {
-		status.Upstream = strings.TrimSpace(upstream)
+		status.Upstream = upstream
 	} else if !status.Detached {
 		status.Upstream = inferredOriginBranch(path, status.Branch)
 	}
@@ -569,6 +647,11 @@ func branchForWorktree(path string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func currentUpstream(path string) (string, error) {
+	upstream, err := gitOutput(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	return strings.TrimSpace(upstream), err
 }
 
 func aheadBehind(path, upstream string) (int, int, error) {

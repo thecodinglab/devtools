@@ -442,6 +442,79 @@ func TestMergeMergesCurrentWorktreeIntoMainAndRemovesIt(t *testing.T) {
 	}
 }
 
+func TestGitWorkflowCommandsOperateThroughCLI(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+
+	if err := os.WriteFile(filepath.Join(mainPath, "main.txt"), []byte("main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, mainPath, "add", "main.txt")
+	gitCmd(t, mainPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "main")
+	gitCmd(t, mainPath, "push", "origin", "main")
+
+	changeCwd(t, featurePath)
+	if err := os.WriteFile(filepath.Join(featurePath, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, featurePath, "add", "feature.txt")
+	gitCmd(t, featurePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feature")
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"rebase"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("rebase returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "main" {
+		t.Fatalf("rebase stdout = %q, want main", strings.TrimSpace(stdout.String()))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"push"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("push returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "feature/test\torigin/feature/test" {
+		t.Fatalf("push stdout = %q", strings.TrimSpace(stdout.String()))
+	}
+
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitCmd(t, filepath.Dir(clone), "clone", remote, clone)
+	if err := os.WriteFile(filepath.Join(clone, "remote.txt"), []byte("remote\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, clone, "add", "remote.txt")
+	gitCmd(t, clone, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "remote")
+	gitCmd(t, clone, "push", "origin", "main")
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"update"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("update returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != mainPath {
+		t.Fatalf("update stdout = %q, want %q", strings.TrimSpace(stdout.String()), mainPath)
+	}
+	if _, err := os.Stat(filepath.Join(mainPath, "remote.txt")); err != nil {
+		t.Fatalf("expected updated main worktree: %v", err)
+	}
+}
+
 func installFakeTmux(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()

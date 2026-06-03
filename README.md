@@ -40,6 +40,9 @@ devtools clone <repo-url> [project-name]
 devtools migrate [--allow-dirty] [path]
 devtools work <branch> [--from <start-point>]
 devtools merge
+devtools update [--all]
+devtools push
+devtools rebase [--onto <base>]
 devtools done [worktree] [--force] [--keep-branch] [--allow-main]
 devtools list
 devtools status [--all]
@@ -116,6 +119,32 @@ Merges the current worktree branch into the `main` worktree, fast-forwarding whe
 
 ```sh
 devtools merge
+```
+
+### `update`
+
+Fetches from `origin` and fast-forwards the current project's `main` or `master` worktree. The main worktree must be clean. Pass `--all` to update main worktrees for all managed projects under the workspace root.
+
+```sh
+devtools update
+devtools update --all
+```
+
+### `push`
+
+Pushes the current branch. If the branch has no upstream, it pushes to `origin` and sets the upstream.
+
+```sh
+devtools push
+```
+
+### `rebase`
+
+Rebases the current worktree onto the current project's `main` or `master` branch by default. The worktree must be clean. Use `--onto` to choose a different base ref.
+
+```sh
+devtools rebase
+devtools rebase --onto origin/main
 ```
 
 ### `done`

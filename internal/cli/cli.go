@@ -56,6 +56,9 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		migrateCommand(a, stdout),
 		newWorktreeCommand(a, stdout),
 		mergeCommand(a, stdout),
+		updateCommand(a, stdout),
+		pushCommand(stdout),
+		rebaseCommand(a, stdout),
 		removeWorktreeCommand(a, stdout),
 		listCommand(a, stdout),
 		statusCommand(a, stdout),
@@ -247,6 +250,121 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func updateCommand(a *app, stdout io.Writer) *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Fast-forward main worktrees",
+		Args:  usageNoArgs("usage: devtools update [--all]"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			g, err := a.globals()
+			if err != nil {
+				return err
+			}
+			if all {
+				return updateAllMainWorktrees(g.root, stdout)
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			project, err := devgit.InferProject(g.root, cwd)
+			if err != nil {
+				return err
+			}
+			result, err := devgit.UpdateMainWorktree(g.root, project)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, result.WorktreePath)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "update main worktrees for all managed projects")
+	return cmd
+}
+
+func updateAllMainWorktrees(root string, stdout io.Writer) error {
+	targets, err := discovery.Scan(root)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		if target.Kind != "worktree" || seen[target.Project] || (target.Worktree != "main" && target.Worktree != "master") {
+			continue
+		}
+		seen[target.Project] = true
+		result, err := devgit.UpdateMainWorktree(root, target.Project)
+		if err != nil {
+			return fmt.Errorf("%s: %w", target.Project, err)
+		}
+		fmt.Fprintln(stdout, result.WorktreePath)
+	}
+	return nil
+}
+
+func pushCommand(stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "push",
+		Short: "Push the current branch",
+		Args:  usageNoArgs("usage: devtools push"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			result, err := devgit.PushCurrent(cwd)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "%s\t%s\n", result.Branch, result.Upstream)
+			return nil
+		},
+	}
+}
+
+func rebaseCommand(a *app, stdout io.Writer) *cobra.Command {
+	var onto string
+	cmd := &cobra.Command{
+		Use:   "rebase",
+		Short: "Rebase the current worktree",
+		Args:  usageNoArgs("usage: devtools rebase [--onto <base>]"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			if onto == "" {
+				onto = defaultBaseRef(a, cwd)
+			}
+			if err := devgit.RebaseCurrent(cwd, onto); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, onto)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&onto, "onto", "", "base ref")
+	return cmd
+}
+
+func defaultBaseRef(a *app, cwd string) string {
+	g, err := a.globals()
+	if err != nil {
+		return "main"
+	}
+	project, err := devgit.InferProject(g.root, cwd)
+	if err != nil {
+		return "main"
+	}
+	branch, err := devgit.MainBranch(g.root, project)
+	if err != nil {
+		return "main"
+	}
+	return branch
 }
 
 func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
