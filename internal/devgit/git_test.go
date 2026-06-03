@@ -147,6 +147,54 @@ func TestRemoveWorktreeRejectsUnpushedBranch(t *testing.T) {
 	}
 }
 
+func TestStatusReportsDirtyAheadBehindAndUpstream(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	result, err := Clone(root, remote, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := Status(result.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Branch != "main" || status.Upstream != "origin/main" || status.Ahead != 0 || status.Behind != 0 || status.Dirty {
+		t.Fatalf("clean status = %#v", status)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.WorktreePath, "local.txt"), []byte("local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err = Status(result.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Dirty || status.Changes != 1 {
+		t.Fatalf("dirty status = %#v, want one change", status)
+	}
+	gitCmd(t, result.WorktreePath, "add", "local.txt")
+	gitCmd(t, result.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "local")
+
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitCmd(t, filepath.Dir(clone), "clone", remote, clone)
+	if err := os.WriteFile(filepath.Join(clone, "remote.txt"), []byte("remote\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, clone, "add", "remote.txt")
+	gitCmd(t, clone, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "remote")
+	gitCmd(t, clone, "push", "origin", "main")
+	gitCmd(t, result.WorktreePath, "fetch", "origin")
+
+	status, err = Status(result.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Dirty || status.Ahead != 1 || status.Behind != 1 || !status.HasUpstream {
+		t.Fatalf("diverged status = %#v, want clean ahead=1 behind=1", status)
+	}
+}
+
 func createRemote(t *testing.T, branch string) string {
 	t.Helper()
 	base := t.TempDir()

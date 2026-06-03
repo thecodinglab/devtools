@@ -42,6 +42,7 @@ devtools work <branch> [--from <start-point>]
 devtools merge
 devtools done [worktree] [--force] [--keep-branch] [--allow-main]
 devtools list
+devtools status [--all]
 devtools switch [path-or-query]
 devtools pick
 devtools sessions
@@ -135,6 +136,17 @@ Lists discovered worktrees under the workspace root.
 
 ```sh
 devtools list
+```
+
+### `status`
+
+Shows a compact dashboard with branch, clean or dirty state, ahead/behind counts, and upstream.
+
+When run from inside a managed worktree, only worktrees for that project are shown. From outside a managed project, the whole workspace root is shown. Pass `--all` to show the whole workspace root from anywhere.
+
+```sh
+devtools status
+devtools status --all
 ```
 
 ### `switch`

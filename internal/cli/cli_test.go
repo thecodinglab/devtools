@@ -47,6 +47,78 @@ func TestListAcceptsRootPersistentFlag(t *testing.T) {
 	}
 }
 
+func TestStatusShowsCompactDashboardForDiscoveredWorktrees(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"clone", remote, "gadgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	changeCwd(t, mainPath)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	if err := os.WriteFile(filepath.Join(featurePath, "scratch.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"status"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("status returned %d, stderr=%s", code, stderr.String())
+	}
+	got := strings.TrimSpace(stdout.String())
+	lines := strings.Split(got, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("stdout = %q, want header plus two current-project rows", got)
+	}
+	if strings.Contains(got, "gadgets/main") {
+		t.Fatalf("default status should only show current project, got %q", got)
+	}
+	if !strings.Contains(lines[0], "WORKTREE") || !strings.Contains(lines[0], "UPSTREAM") {
+		t.Fatalf("header = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "widgets/feature-test") || !strings.Contains(lines[1], "feature/test") || !strings.Contains(lines[1], "dirty(1)") || !strings.Contains(lines[1], "-") {
+		t.Fatalf("feature row = %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "widgets/main") || !strings.Contains(lines[2], "main") || !strings.Contains(lines[2], "clean") || !strings.Contains(lines[2], "origin/main") {
+		t.Fatalf("main row = %q", lines[2])
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"status", "--all"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("status --all returned %d, stderr=%s", code, stderr.String())
+	}
+	got = strings.TrimSpace(stdout.String())
+	if !strings.Contains(got, "gadgets/main") || !strings.Contains(got, "widgets/feature-test") || !strings.Contains(got, "widgets/main") {
+		t.Fatalf("status --all output = %q, want all worktrees", got)
+	}
+
+	changeCwd(t, t.TempDir())
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"status"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("status outside project returned %d, stderr=%s", code, stderr.String())
+	}
+	got = strings.TrimSpace(stdout.String())
+	if !strings.Contains(got, "gadgets/main") || !strings.Contains(got, "widgets/feature-test") || !strings.Contains(got, "widgets/main") {
+		t.Fatalf("status outside project output = %q, want all worktrees", got)
+	}
+}
+
 func TestShortWorkAndRemoveAliasesAreNotRegistered(t *testing.T) {
 	for _, name := range []string{"w", "rm"} {
 		var stdout, stderr bytes.Buffer

@@ -58,6 +58,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		mergeCommand(a, stdout),
 		removeWorktreeCommand(a, stdout),
 		listCommand(a, stdout),
+		statusCommand(a, stdout),
 		switchCommand(a),
 		pickCommand(a),
 		sessionsCommand(),
@@ -346,6 +347,132 @@ func listCommand(a *app, stdout io.Writer) *cobra.Command {
 			}
 			return nil
 		},
+	}
+}
+
+func statusCommand(a *app, stdout io.Writer) *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show worktree status dashboard",
+		Args:  usageNoArgs("usage: devtools status [--all]"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			g, err := a.globals()
+			if err != nil {
+				return err
+			}
+			targets, err := discovery.Scan(g.root)
+			if err != nil {
+				return err
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			targets = statusTargets(targets, cwd, all)
+			rows := make([]statusRow, 0, len(targets))
+			for _, target := range targets {
+				status, err := devgit.Status(target.Path)
+				if err != nil {
+					return fmt.Errorf("%s: %w", target.Label, err)
+				}
+				rows = append(rows, newStatusRow(target, status))
+			}
+			printStatusRows(stdout, rows)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "show all worktrees under the workspace root")
+	return cmd
+}
+
+func statusTargets(targets []discovery.Target, cwd string, all bool) []discovery.Target {
+	if all {
+		return targets
+	}
+	current, ok := currentTarget(targets, cwd)
+	if !ok {
+		return targets
+	}
+	filtered := make([]discovery.Target, 0, len(targets))
+	for _, target := range targets {
+		if target.Project == current.Project {
+			filtered = append(filtered, target)
+		}
+	}
+	return filtered
+}
+
+func currentTarget(targets []discovery.Target, cwd string) (discovery.Target, bool) {
+	cwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return discovery.Target{}, false
+	}
+	if canonical, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = canonical
+	}
+	for _, target := range targets {
+		path, err := filepath.Abs(target.Path)
+		if err != nil {
+			continue
+		}
+		if canonical, err := filepath.EvalSymlinks(path); err == nil {
+			path = canonical
+		}
+		rel, err := filepath.Rel(path, cwd)
+		if err == nil && (rel == "." || !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..") {
+			return target, true
+		}
+	}
+	return discovery.Target{}, false
+}
+
+type statusRow struct {
+	Worktree string
+	Branch   string
+	State    string
+	Ahead    string
+	Behind   string
+	Upstream string
+}
+
+func newStatusRow(target discovery.Target, status devgit.WorktreeStatus) statusRow {
+	state := "clean"
+	if status.Dirty {
+		state = fmt.Sprintf("dirty(%d)", status.Changes)
+	}
+	ahead := "-"
+	behind := "-"
+	upstream := "-"
+	if status.HasUpstream {
+		ahead = fmt.Sprint(status.Ahead)
+		behind = fmt.Sprint(status.Behind)
+		upstream = status.Upstream
+	}
+	return statusRow{
+		Worktree: target.Label,
+		Branch:   status.Branch,
+		State:    state,
+		Ahead:    ahead,
+		Behind:   behind,
+		Upstream: upstream,
+	}
+}
+
+func printStatusRows(stdout io.Writer, rows []statusRow) {
+	widths := []int{len("WORKTREE"), len("BRANCH"), len("STATE"), len("AHEAD"), len("BEHIND"), len("UPSTREAM")}
+	for _, row := range rows {
+		widths[0] = max(widths[0], len(row.Worktree))
+		widths[1] = max(widths[1], len(row.Branch))
+		widths[2] = max(widths[2], len(row.State))
+		widths[3] = max(widths[3], len(row.Ahead))
+		widths[4] = max(widths[4], len(row.Behind))
+		widths[5] = max(widths[5], len(row.Upstream))
+	}
+	format := fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds  %%%ds  %%%ds  %%-%ds\n", widths[0], widths[1], widths[2], widths[3], widths[4], widths[5])
+	fmt.Fprintf(stdout, format, "WORKTREE", "BRANCH", "STATE", "AHEAD", "BEHIND", "UPSTREAM")
+	for _, row := range rows {
+		fmt.Fprintf(stdout, format, row.Worktree, row.Branch, row.State, row.Ahead, row.Behind, row.Upstream)
 	}
 }
 

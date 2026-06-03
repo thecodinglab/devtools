@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +33,17 @@ type MergeResult struct {
 	MainWorktree     string
 	MainWorktreePath string
 	Branch           string
+}
+
+type WorktreeStatus struct {
+	Branch      string
+	Detached    bool
+	Dirty       bool
+	Changes     int
+	Upstream    string
+	Ahead       int
+	Behind      int
+	HasUpstream bool
 }
 
 type removePlan struct {
@@ -326,6 +338,51 @@ func CurrentHEAD(path string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+func Status(path string) (WorktreeStatus, error) {
+	branch, err := currentBranch(path)
+	if err != nil {
+		return WorktreeStatus{}, err
+	}
+	status := WorktreeStatus{Branch: branch}
+	if status.Branch == "" {
+		head, err := shortHEAD(path)
+		if err != nil {
+			return WorktreeStatus{}, err
+		}
+		status.Branch = "HEAD@" + head
+		status.Detached = true
+	}
+
+	porcelain, err := gitOutput(path, "status", "--porcelain")
+	if err != nil {
+		return WorktreeStatus{}, err
+	}
+	lines := strings.Split(strings.TrimSpace(porcelain), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	status.Changes = len(lines)
+	status.Dirty = status.Changes > 0
+
+	upstream, err := gitOutput(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err == nil {
+		status.Upstream = strings.TrimSpace(upstream)
+	} else if !status.Detached {
+		status.Upstream = inferredOriginBranch(path, status.Branch)
+	}
+	status.HasUpstream = status.Upstream != ""
+	if !status.HasUpstream {
+		return status, nil
+	}
+	ahead, behind, err := aheadBehind(path, status.Upstream)
+	if err != nil {
+		return WorktreeStatus{}, err
+	}
+	status.Ahead = ahead
+	status.Behind = behind
+	return status, nil
+}
+
 func Migrate(path string, allowDirty bool) (Result, error) {
 	projectPath, err := filepath.Abs(path)
 	if err != nil {
@@ -493,12 +550,45 @@ func currentBranch(path string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+func shortHEAD(path string) (string, error) {
+	out, err := gitOutput(path, "rev-parse", "--short", "HEAD")
+	return strings.TrimSpace(out), err
+}
+
+func inferredOriginBranch(path, branch string) string {
+	remote := "origin/" + branch
+	if _, err := gitOutput(path, "show-ref", "--verify", "--quiet", "refs/remotes/"+remote); err != nil {
+		return ""
+	}
+	return remote
+}
+
 func branchForWorktree(path string) (string, error) {
 	out, err := gitOutput(path, "branch", "--show-current")
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func aheadBehind(path, upstream string) (int, int, error) {
+	out, err := gitOutput(path, "rev-list", "--left-right", "--count", "HEAD..."+upstream)
+	if err != nil {
+		return 0, 0, err
+	}
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, 0, fmt.Errorf("unexpected ahead/behind output: %q", strings.TrimSpace(out))
+	}
+	ahead, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	behind, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return ahead, behind, nil
 }
 
 func remoteBranchExists(barePath, branch string) bool {
