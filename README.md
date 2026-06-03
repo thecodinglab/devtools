@@ -9,7 +9,7 @@ By default it uses `~/dev` as the workspace root. Set `DEVTOOLS_ROOT` or pass `-
 - Go 1.26 or newer
 - Git
 - tmux
-- fzf, for interactive picking with `devtools pick` or ambiguous `devtools switch` queries
+- fzf, for interactive picking with `devtools pick`, `devtools sessions`, or ambiguous `devtools switch` queries
 - Nix, optional, for the provided dev shell and package build
 
 ## Install
@@ -44,6 +44,7 @@ devtools done [worktree] [--force] [--keep-branch] [--allow-main]
 devtools list
 devtools switch [path-or-query]
 devtools pick
+devtools sessions
 ```
 
 Common flow:
@@ -153,6 +154,14 @@ Always opens the interactive picker and switches to the selected worktree.
 
 ```sh
 devtools pick
+```
+
+### `sessions`
+
+Opens an interactive picker for active tmux sessions and switches to the selected session.
+
+```sh
+devtools sessions
 ```
 
 ## Development

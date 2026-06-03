@@ -200,6 +200,34 @@ func TestSwitchAmbiguousQueryUsesPickerWithMatches(t *testing.T) {
 	}
 }
 
+func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
+	log := installFakeTmuxWithSessions(t, "work\t1\t0\nops\t2\t1")
+	fzfLog := installFakeFZF(t, "ops\t2 windows\tattached")
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"sessions"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("sessions returned %d, stderr=%s", code, stderr.String())
+	}
+	fzfInput, err := os.ReadFile(fzfLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotInput := strings.TrimSpace(string(fzfInput))
+	wantInput := "work\t1 windows\nops\t2 windows\tattached"
+	if gotInput != wantInput {
+		t.Fatalf("fzf input = %q, want %q", gotInput, wantInput)
+	}
+	got := tmuxCommands(t, log)
+	want := []string{
+		"list-sessions -F #{session_name}\t#{session_windows}\t#{session_attached}",
+		"switch-client -t ops",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("tmux commands = %#v, want %#v", got, want)
+	}
+}
+
 func TestRemoveSwitchesToMainSessionBeforeRemovingFeature(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
@@ -353,6 +381,22 @@ func installFakeTmux(t *testing.T) string {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("TMUX_LOG", log)
+	t.Setenv("TMUX", "")
+	return log
+}
+
+func installFakeTmuxWithSessions(t *testing.T, sessions string) string {
+	t.Helper()
+	bin := t.TempDir()
+	log := filepath.Join(t.TempDir(), "tmux.log")
+	fakeTmux := filepath.Join(bin, "tmux")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\nif [ \"$1\" = \"list-sessions\" ]; then\nprintf '%s\\n' \"$TMUX_SESSIONS\"\nfi\n"
+	if err := os.WriteFile(fakeTmux, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TMUX_LOG", log)
+	t.Setenv("TMUX_SESSIONS", sessions)
 	t.Setenv("TMUX", "")
 	return log
 }

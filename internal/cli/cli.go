@@ -60,6 +60,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		listCommand(a, stdout),
 		switchCommand(a),
 		pickCommand(a),
+		sessionsCommand(),
 	)
 	return cmd
 }
@@ -403,6 +404,36 @@ func pickCommand(a *app) *cobra.Command {
 				return err
 			}
 			return tmux.Switch(target.Path, tmux.SessionName(target.Project, target.Worktree))
+		},
+	}
+}
+
+func sessionsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sessions",
+		Short: "Pick an active tmux session",
+		Args:  usageNoArgs("usage: devtools sessions"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessions, err := tmux.ListSessions()
+			if err != nil {
+				return err
+			}
+			options := make([]picker.Option, 0, len(sessions))
+			for _, session := range sessions {
+				label := fmt.Sprintf("%s\t%d windows", session.Name, session.Windows)
+				if session.Attached {
+					label += "\tattached"
+				}
+				options = append(options, picker.Option{
+					Label: label,
+					Value: session.Name,
+				})
+			}
+			option, err := picker.SelectOption(options, "no tmux sessions found")
+			if err != nil {
+				return err
+			}
+			return tmux.SwitchSession(option.Value)
 		},
 	}
 }

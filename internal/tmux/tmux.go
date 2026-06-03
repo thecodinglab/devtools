@@ -5,9 +5,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"unicode"
 )
+
+type Session struct {
+	Name     string
+	Windows  int
+	Attached bool
+}
 
 func SessionName(project, worktree string) string {
 	name := strings.Trim(project+"-"+worktree, "-")
@@ -31,6 +38,37 @@ func SessionName(project, worktree string) string {
 	return clean
 }
 
+func ListSessions() ([]Session, error) {
+	out, err := output("tmux", "list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}")
+	if err != nil {
+		return nil, err
+	}
+	return parseSessionList(out)
+}
+
+func parseSessionList(out string) ([]Session, error) {
+	var sessions []Session
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("unexpected tmux list-sessions output %q", line)
+		}
+		windows, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("unexpected tmux session window count %q", parts[1])
+		}
+		sessions = append(sessions, Session{
+			Name:     parts[0],
+			Windows:  windows,
+			Attached: parts[2] != "0",
+		})
+	}
+	return sessions, nil
+}
+
 func Switch(dir, session string) error {
 	if os.Getenv("TMUX") == "" {
 		return runAttached("tmux", "new-session", "-A", "-s", session, "-c", dir)
@@ -39,6 +77,13 @@ func Switch(dir, session string) error {
 		if err := run("tmux", "new-session", "-d", "-s", session, "-c", dir); err != nil {
 			return err
 		}
+	}
+	return run("tmux", "switch-client", "-t", session)
+}
+
+func SwitchSession(session string) error {
+	if os.Getenv("TMUX") == "" {
+		return runAttached("tmux", "attach-session", "-t", session)
 	}
 	return run("tmux", "switch-client", "-t", session)
 }
@@ -59,6 +104,21 @@ func CloseForRemoval(targetSession, fallbackSession, fallbackDir string) error {
 		return run("tmux", "kill-session", "-t", targetSession)
 	}
 	return nil
+}
+
+func output(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+	}
+	return stdout.String(), nil
 }
 
 func hasSession(session string) bool {
