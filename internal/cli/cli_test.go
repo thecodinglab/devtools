@@ -283,6 +283,65 @@ func TestRemoveMainDetachesBeforeRemovingSession(t *testing.T) {
 	}
 }
 
+func TestMergeMergesCurrentWorktreeIntoMainAndRemovesIt(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	log := installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	if err := os.WriteFile(filepath.Join(featurePath, "feature.txt"), []byte("merged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, featurePath, "add", "feature.txt")
+	gitCmd(t, featurePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feature")
+
+	changeCwd(t, featurePath)
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	clearFile(t, log)
+	stdout.Reset()
+	stderr.Reset()
+
+	if code := Run([]string{"merge"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("merge returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != mainPath {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), mainPath)
+	}
+	if _, err := os.Stat(filepath.Join(mainPath, "feature.txt")); err != nil {
+		t.Fatalf("expected merged file in main: %v", err)
+	}
+	if _, err := os.Stat(featurePath); !os.IsNotExist(err) {
+		t.Fatalf("expected feature worktree to be removed, err=%v", err)
+	}
+	barePath := filepath.Join(root, "widgets", ".bare")
+	cmd := exec.Command("git", "--git-dir", barePath, "show-ref", "--verify", "--quiet", "refs/heads/feature/test")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected feature branch to be deleted")
+	}
+	got := tmuxCommands(t, log)
+	want := []string{
+		"has-session -t widgets-main",
+		"switch-client -t widgets-main",
+		"has-session -t widgets-feature-test",
+		"kill-session -t widgets-feature-test",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("tmux commands = %#v, want %#v", got, want)
+	}
+}
+
 func installFakeTmux(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir()

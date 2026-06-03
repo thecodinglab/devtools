@@ -55,6 +55,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		cloneCommand(a, stdout),
 		migrateCommand(a, stdout),
 		newWorktreeCommand(a, stdout),
+		mergeCommand(a, stdout),
 		removeWorktreeCommand(a, stdout),
 		listCommand(a, stdout),
 		switchCommand(a),
@@ -200,6 +201,50 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&from, "from", "", "start point")
 	return cmd
+}
+
+func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "merge",
+		Short: "Merge the current worktree into main and remove it",
+		Args:  usageNoArgs("usage: devtools merge"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			g, err := a.globals()
+			if err != nil {
+				return err
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			project, worktree, err := devgit.InferProjectWorktree(g.root, cwd)
+			if err != nil {
+				return err
+			}
+			result, err := devgit.MergeWorktreeToMain(g.root, project, worktree)
+			if err != nil {
+				return err
+			}
+			restoreHangup := ignoreHangup()
+			defer restoreHangup()
+			if err := tmux.CloseForRemoval(
+				tmux.SessionName(result.Project, result.Worktree),
+				tmux.SessionName(result.Project, result.MainWorktree),
+				result.MainWorktreePath,
+			); err != nil {
+				return err
+			}
+			_, err = devgit.RemoveWorktree(g.root, project, worktree, devgit.RemoveOptions{
+				Force:        true,
+				DeleteBranch: true,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, result.MainWorktreePath)
+			return nil
+		},
+	}
 }
 
 func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {

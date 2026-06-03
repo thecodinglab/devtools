@@ -39,6 +39,7 @@ devtools new <project-name>
 devtools clone <repo-url> [project-name]
 devtools migrate [--allow-dirty] [path]
 devtools work <branch> [--from <start-point>]
+devtools merge
 devtools done [worktree] [--force] [--keep-branch] [--allow-main]
 devtools list
 devtools switch [path-or-query]
@@ -51,8 +52,7 @@ Common flow:
 devtools clone git@github.com:owner/repo.git repo
 cd ~/dev/repo/main
 devtools work feature/example
-devtools switch repo/main
-devtools done feature-example
+devtools merge
 ```
 
 `clone` creates a bare repository at:
@@ -107,6 +107,14 @@ devtools work experiment --from origin/main
 ```
 
 When `--from` is omitted, the current checkout's `HEAD` is used as the start point.
+
+### `merge`
+
+Merges the current worktree branch into the `main` worktree, fast-forwarding when Git can, then removes the merged worktree and deletes its local branch. Both worktrees must be clean.
+
+```sh
+devtools merge
+```
 
 ### `done`
 

@@ -27,6 +27,13 @@ type RemoveOptions struct {
 	AllowMain    bool
 }
 
+type MergeResult struct {
+	Result
+	MainWorktree     string
+	MainWorktreePath string
+	Branch           string
+}
+
 type removePlan struct {
 	result Result
 	branch string
@@ -143,6 +150,49 @@ func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result,
 	return plan.result, nil
 }
 
+func MergeWorktreeToMain(root, project, worktree string) (MergeResult, error) {
+	plan, err := planRemoveWorktree(root, project, worktree, RemoveOptions{
+		Force:        true,
+		DeleteBranch: true,
+	})
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if plan.branch == "main" || plan.branch == "master" {
+		return MergeResult{}, fmt.Errorf("refusing to merge %s worktree into itself", plan.branch)
+	}
+	clean, err := isClean(plan.result.WorktreePath)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if !clean {
+		return MergeResult{}, errors.New("worktree has uncommitted changes; commit or stash them before merging")
+	}
+
+	mainWorktree, mainWorktreePath, err := mainWorktree(root, project)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	clean, err = isClean(mainWorktreePath)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if !clean {
+		return MergeResult{}, errors.New("main worktree has uncommitted changes; commit or stash them before merging")
+	}
+
+	if err := git(mainWorktreePath, "merge", plan.branch); err != nil {
+		return MergeResult{}, err
+	}
+
+	return MergeResult{
+		Result:           plan.result,
+		MainWorktree:     mainWorktree,
+		MainWorktreePath: mainWorktreePath,
+		Branch:           plan.branch,
+	}, nil
+}
+
 func PlanRemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result, error) {
 	plan, err := planRemoveWorktree(root, project, worktree, opts)
 	if err != nil {
@@ -195,6 +245,17 @@ func planRemoveWorktree(root, project, worktree string, opts RemoveOptions) (rem
 	}
 	result := Result{Project: project, Worktree: worktreeName, ProjectPath: projectPath, BarePath: barePath, WorktreePath: worktreePath}
 	return removePlan{result: result, branch: branch}, nil
+}
+
+func mainWorktree(root, project string) (string, string, error) {
+	projectPath := filepath.Join(root, project)
+	for _, worktree := range []string{"main", "master"} {
+		path := filepath.Join(projectPath, worktree)
+		if stat, err := os.Stat(path); err == nil && stat.IsDir() {
+			return worktree, path, nil
+		}
+	}
+	return "", "", fmt.Errorf("main worktree not found in %s", projectPath)
 }
 
 func InferProject(root, cwd string) (string, error) {
