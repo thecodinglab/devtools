@@ -62,6 +62,9 @@ func TestMigratePreservesCheckoutAsDefaultWorktree(t *testing.T) {
 	repo := filepath.Join(root, "widgets")
 	gitCmd(t, root, "clone", remote, repo)
 	gitCmd(t, repo, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repo, "scratch.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := Migrate(repo, false)
 	if err != nil {
@@ -79,10 +82,11 @@ func TestMigratePreservesCheckoutAsDefaultWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, ".git")); !os.IsNotExist(err) {
 		t.Fatalf("expected original .git path to be gone, err=%v", err)
 	}
-	status := gitOut(t, filepath.Join(repo, "main"), "status", "--porcelain")
+	status := gitOut(t, filepath.Join(repo, "main"), "status", "--porcelain", "--untracked-files=no")
 	if strings.TrimSpace(status) != "" {
 		t.Fatalf("migrated worktree is dirty:\n%s", status)
 	}
+	assertExists(t, filepath.Join(repo, "main", "scratch.txt"))
 	list := gitOut(t, repo, "--git-dir", filepath.Join(repo, ".bare"), "worktree", "list", "--porcelain")
 	if !strings.Contains(list, "worktree "+result.WorktreePath) {
 		t.Fatalf("worktree list missing preserved checkout:\n%s", list)
@@ -170,9 +174,20 @@ func TestStatusReportsDirtyAheadBehindAndUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if status.Dirty || status.Changes != 0 {
+		t.Fatalf("untracked status = %#v, want clean", status)
+	}
+	if err := os.WriteFile(filepath.Join(result.WorktreePath, "README.md"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err = Status(result.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !status.Dirty || status.Changes != 1 {
 		t.Fatalf("dirty status = %#v, want one change", status)
 	}
+	gitCmd(t, result.WorktreePath, "checkout", "--", "README.md")
 	gitCmd(t, result.WorktreePath, "add", "local.txt")
 	gitCmd(t, result.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "local")
 

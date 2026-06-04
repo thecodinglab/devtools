@@ -73,6 +73,9 @@ func TestStatusShowsCompactDashboardForDiscoveredWorktrees(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(featurePath, "scratch.txt"), []byte("dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(featurePath, "README.md"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout.Reset()
 	stderr.Reset()

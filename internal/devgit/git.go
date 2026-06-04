@@ -431,7 +431,7 @@ func Status(path string) (WorktreeStatus, error) {
 		status.Detached = true
 	}
 
-	porcelain, err := gitOutput(path, "status", "--porcelain")
+	porcelain, err := trackedStatusPorcelain(path)
 	if err != nil {
 		return WorktreeStatus{}, err
 	}
@@ -685,11 +685,15 @@ func localBranchExists(barePath, branch string) bool {
 }
 
 func isClean(path string) (bool, error) {
-	out, err := gitOutput(path, "status", "--porcelain")
+	out, err := trackedStatusPorcelain(path)
 	if err != nil {
 		return false, err
 	}
 	return strings.TrimSpace(out) == "", nil
+}
+
+func trackedStatusPorcelain(path string) (string, error) {
+	return gitOutput(path, "status", "--porcelain", "--untracked-files=no")
 }
 
 func isPushed(path string) error {

@@ -95,7 +95,7 @@ devtools clone git@github.com:owner/repo.git custom-name
 
 ### `migrate`
 
-Migrates an existing checkout into the managed layout. Dirty checkouts are rejected unless `--allow-dirty` is passed.
+Migrates an existing checkout into the managed layout. Checkouts with tracked uncommitted changes are rejected unless `--allow-dirty` is passed. Untracked files are ignored by this check.
 
 ```sh
 devtools migrate
@@ -169,7 +169,7 @@ devtools list
 
 ### `status`
 
-Shows a compact dashboard with branch, clean or dirty state, ahead/behind counts, and upstream.
+Shows a compact dashboard with branch, clean or dirty state, ahead/behind counts, and upstream. Untracked files are ignored when computing the dirty state.
 
 When run from inside a managed worktree, only worktrees for that project are shown. From outside a managed project, the whole workspace root is shown. Pass `--all` to show the whole workspace root from anywhere.
 
