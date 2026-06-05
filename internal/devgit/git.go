@@ -35,6 +35,10 @@ type MergeResult struct {
 	Branch           string
 }
 
+type MergeOptions struct {
+	Squash bool
+}
+
 type PushResult struct {
 	Branch   string
 	Upstream string
@@ -167,7 +171,7 @@ func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result,
 	return plan.result, nil
 }
 
-func MergeWorktreeToMain(root, project, worktree string) (MergeResult, error) {
+func MergeWorktreeToMain(root, project, worktree string, opts MergeOptions) (MergeResult, error) {
 	plan, err := planRemoveWorktree(root, project, worktree, RemoveOptions{
 		Force:        true,
 		DeleteBranch: true,
@@ -198,8 +202,17 @@ func MergeWorktreeToMain(root, project, worktree string) (MergeResult, error) {
 		return MergeResult{}, errors.New("main worktree has uncommitted changes; commit or stash them before merging")
 	}
 
-	if err := git(mainWorktreePath, "merge", plan.branch); err != nil {
-		return MergeResult{}, err
+	if opts.Squash {
+		if err := git(mainWorktreePath, "merge", "--squash", plan.branch); err != nil {
+			return MergeResult{}, err
+		}
+		if err := gitInteractive(mainWorktreePath, "commit", "--quiet"); err != nil {
+			return MergeResult{}, err
+		}
+	} else {
+		if err := git(mainWorktreePath, "merge", plan.branch); err != nil {
+			return MergeResult{}, err
+		}
 	}
 
 	return MergeResult{
@@ -744,6 +757,18 @@ func exists(path string) bool {
 func git(dir string, args ...string) error {
 	_, err := gitOutput(dir, args...)
 	return err
+}
+
+func gitInteractive(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git %s: %s", strings.Join(args, " "), err.Error())
+	}
+	return nil
 }
 
 func gitBare(barePath string, args ...string) error {

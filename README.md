@@ -115,10 +115,11 @@ When `--from` is omitted, the current checkout's `HEAD` is used as the start poi
 
 ### `merge`
 
-Merges the current worktree branch into the `main` worktree, fast-forwarding when Git can, then removes the merged worktree and deletes its local branch. Both worktrees must be clean.
+Merges the current worktree branch into the `main` worktree, fast-forwarding when Git can, then removes the merged worktree and deletes its local branch. Both worktrees must be clean. Pass `--squash` to squash the branch changes into one new commit on `main`; Git opens your editor for the commit message.
 
 ```sh
 devtools merge
+devtools merge --squash
 ```
 
 ### `update`
