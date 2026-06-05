@@ -445,6 +445,74 @@ func TestMergeMergesCurrentWorktreeIntoMainAndRemovesIt(t *testing.T) {
 	}
 }
 
+func TestMergeSquashCreatesSingleCommitWithEditorMessage(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	installFakeGitEditor(t, "squashed feature\n\ncombined changes\n")
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	gitCmd(t, mainPath, "config", "user.name", "Test")
+	gitCmd(t, mainPath, "config", "user.email", "test@example.com")
+	gitCmd(t, mainPath, "config", "commit.gpgsign", "false")
+	beforeCount := strings.TrimSpace(gitOut(t, mainPath, "rev-list", "--count", "HEAD"))
+
+	changeCwd(t, mainPath)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	if err := os.WriteFile(filepath.Join(featurePath, "one.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, featurePath, "add", "one.txt")
+	gitCmd(t, featurePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "one")
+	if err := os.WriteFile(filepath.Join(featurePath, "two.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, featurePath, "add", "two.txt")
+	gitCmd(t, featurePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "two")
+
+	changeCwd(t, featurePath)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"merge", "--squash"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("merge --squash returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != mainPath {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), mainPath)
+	}
+	if _, err := os.Stat(filepath.Join(mainPath, "one.txt")); err != nil {
+		t.Fatalf("expected first squashed file in main: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mainPath, "two.txt")); err != nil {
+		t.Fatalf("expected second squashed file in main: %v", err)
+	}
+	if _, err := os.Stat(featurePath); !os.IsNotExist(err) {
+		t.Fatalf("expected feature worktree to be removed, err=%v", err)
+	}
+	afterCount := strings.TrimSpace(gitOut(t, mainPath, "rev-list", "--count", "HEAD"))
+	if afterCount != "2" || beforeCount != "1" {
+		t.Fatalf("commit count before=%s after=%s, want 1 then 2", beforeCount, afterCount)
+	}
+	subject := strings.TrimSpace(gitOut(t, mainPath, "log", "-1", "--format=%s"))
+	if subject != "squashed feature" {
+		t.Fatalf("squash commit subject = %q, want squashed feature", subject)
+	}
+	barePath := filepath.Join(root, "widgets", ".bare")
+	cmd := exec.Command("git", "--git-dir", barePath, "show-ref", "--verify", "--quiet", "refs/heads/feature/test")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected feature branch to be deleted")
+	}
+}
+
 func TestGitWorkflowCommandsOperateThroughCLI(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
@@ -596,6 +664,17 @@ func installFakeFZF(t *testing.T, selection string) string {
 	t.Setenv("FZF_LOG", log)
 	t.Setenv("FZF_SELECTION", selection)
 	return log
+}
+
+func installFakeGitEditor(t *testing.T, message string) {
+	t.Helper()
+	bin := t.TempDir()
+	editor := filepath.Join(bin, "editor")
+	script := "#!/bin/sh\ncat > \"$1\" <<'EOF'\n" + message + "EOF\n"
+	if err := os.WriteFile(editor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_EDITOR", editor)
 }
 
 func makeRepo(t *testing.T, path string) {

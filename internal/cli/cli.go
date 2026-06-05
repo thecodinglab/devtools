@@ -209,10 +209,11 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 }
 
 func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var squash bool
+	cmd := &cobra.Command{
 		Use:   "merge",
 		Short: "Merge the current worktree into main and remove it",
-		Args:  usageNoArgs("usage: devtools merge"),
+		Args:  usageNoArgs("usage: devtools merge [--squash]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			g, err := a.globals()
 			if err != nil {
@@ -226,7 +227,9 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := devgit.MergeWorktreeToMain(g.root, project, worktree)
+			result, err := devgit.MergeWorktreeToMain(g.root, project, worktree, devgit.MergeOptions{
+				Squash: squash,
+			})
 			if err != nil {
 				return err
 			}
@@ -250,6 +253,8 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&squash, "squash", false, "squash the worktree branch into a single commit")
+	return cmd
 }
 
 func updateCommand(a *app, stdout io.Writer) *cobra.Command {
