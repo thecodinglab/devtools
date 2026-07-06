@@ -130,11 +130,14 @@ func AddWorktree(root, project, branch, startPoint string) (Result, error) {
 		return Result{}, fmt.Errorf("%s already exists", worktreePath)
 	}
 	args := []string{"worktree", "add"}
-	if startPoint != "" {
-		args = append(args, "-b", branch, worktreePath, startPoint)
-	} else if localBranchExists(barePath, branch) {
+	switch {
+	case localBranchExists(barePath, branch):
 		args = append(args, worktreePath, branch)
-	} else {
+	case remoteBranchExists(barePath, branch):
+		args = append(args, "-b", branch, worktreePath, "origin/"+branch)
+	case startPoint != "":
+		args = append(args, "-b", branch, worktreePath, startPoint)
+	default:
 		args = append(args, "-b", branch, worktreePath, "origin/"+branch)
 	}
 	if err := gitBare(barePath, args...); err != nil {

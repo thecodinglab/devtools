@@ -109,6 +109,67 @@ func TestAddWorktreeCreatesBranchDirectory(t *testing.T) {
 	assertExists(t, filepath.Join(root, "widgets", "feature-test", "README.md"))
 }
 
+func TestAddWorktreeChecksOutExistingLocalBranch(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, added.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "work")
+	want := strings.TrimSpace(gitOut(t, added.WorktreePath, "rev-parse", "HEAD"))
+	if _, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The branch still exists locally; a fresh `work` should check it out at its tip
+	// rather than failing or branching from the start point.
+	readded, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatalf("expected existing local branch to be checked out: %v", err)
+	}
+	got := strings.TrimSpace(gitOut(t, readded.WorktreePath, "rev-parse", "HEAD"))
+	if got != want {
+		t.Fatalf("HEAD = %q, want existing branch tip %q", got, want)
+	}
+}
+
+func TestAddWorktreeChecksOutExistingRemoteBranch(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, added.WorktreePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "work")
+	gitCmd(t, added.WorktreePath, "push", "-u", "origin", "feature/test")
+	want := strings.TrimSpace(gitOut(t, added.WorktreePath, "rev-parse", "HEAD"))
+	if _, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{DeleteBranch: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only the remote branch remains; `work` should create a tracking branch from
+	// origin/feature/test instead of branching from the start point.
+	readded, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatalf("expected existing remote branch to be checked out: %v", err)
+	}
+	got := strings.TrimSpace(gitOut(t, readded.WorktreePath, "rev-parse", "HEAD"))
+	if got != want {
+		t.Fatalf("HEAD = %q, want remote branch tip %q", got, want)
+	}
+	upstream := strings.TrimSpace(gitOut(t, readded.WorktreePath, "rev-parse", "--abbrev-ref", "feature/test@{upstream}"))
+	if upstream != "origin/feature/test" {
+		t.Fatalf("upstream = %q, want origin/feature/test", upstream)
+	}
+}
+
 func TestRemoveWorktreeRequiresPushedBranchAndDeletesLocalBranch(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t, "main")
