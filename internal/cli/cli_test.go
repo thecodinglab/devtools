@@ -293,6 +293,15 @@ func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
 	if gotInput != wantInput {
 		t.Fatalf("fzf input = %q, want %q", gotInput, wantInput)
 	}
+	fzfArgs, err := os.ReadFile(fzfLog + ".args")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotArgs := strings.TrimSpace(string(fzfArgs))
+	wantArgs := "--with-nth=1 --delimiter=\t --preview tmux capture-pane -ep -t {1}"
+	if gotArgs != wantArgs {
+		t.Fatalf("fzf args = %q, want %q", gotArgs, wantArgs)
+	}
 	got := tmuxCommands(t, log)
 	want := []string{
 		"list-sessions -F #{session_name}\t#{session_windows}\t#{session_attached}",
@@ -656,7 +665,7 @@ func installFakeFZF(t *testing.T, selection string) string {
 	bin := t.TempDir()
 	log := filepath.Join(t.TempDir(), "fzf.log")
 	fakeFZF := filepath.Join(bin, "fzf")
-	script := "#!/bin/sh\ncat > \"$FZF_LOG\"\nprintf '%s\\n' \"$FZF_SELECTION\"\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$FZF_LOG.args\"\ncat > \"$FZF_LOG\"\nprintf '%s\\n' \"$FZF_SELECTION\"\n"
 	if err := os.WriteFile(fakeFZF, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

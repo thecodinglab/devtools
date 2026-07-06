@@ -38,7 +38,7 @@ func Select(targets []discovery.Target) (discovery.Target, error) {
 	return target, nil
 }
 
-func SelectOption(options []Option, emptyMessage string) (Option, error) {
+func SelectOption(options []Option, emptyMessage, preview string) (Option, error) {
 	if len(options) == 0 {
 		return Option{}, errors.New(emptyMessage)
 	}
@@ -50,7 +50,11 @@ func SelectOption(options []Option, emptyMessage string) (Option, error) {
 		input.WriteString(line)
 		input.WriteByte('\n')
 	}
-	line, err := runFZF(input.String())
+	var extraArgs []string
+	if preview != "" {
+		extraArgs = append(extraArgs, "--preview", preview)
+	}
+	line, err := runFZF(input.String(), extraArgs...)
 	if err != nil {
 		return Option{}, err
 	}
@@ -61,8 +65,8 @@ func SelectOption(options []Option, emptyMessage string) (Option, error) {
 	return option, nil
 }
 
-func runFZF(input string) (string, error) {
-	cmd := exec.Command("fzf", "--with-nth=1")
+func runFZF(input string, extraArgs ...string) (string, error) {
+	cmd := exec.Command("fzf", append([]string{"--with-nth=1", "--delimiter=\t"}, extraArgs...)...)
 	cmd.Stdin = strings.NewReader(input)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out

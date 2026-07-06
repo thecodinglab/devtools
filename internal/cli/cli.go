@@ -679,7 +679,7 @@ func sessionsCommand() *cobra.Command {
 					Value: session.Name,
 				})
 			}
-			option, err := picker.SelectOption(options, "no tmux sessions found")
+			option, err := picker.SelectOption(options, "no tmux sessions found", "tmux capture-pane -ep -t {1}")
 			if err != nil {
 				return err
 			}
