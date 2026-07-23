@@ -69,6 +69,43 @@ func parseSessionList(out string) ([]Session, error) {
 	return sessions, nil
 }
 
+type Window struct {
+	ID    string
+	Index int
+	Name  string
+}
+
+func ListWindows(session string) ([]Window, error) {
+	out, err := output("tmux", "list-windows", "-t", session, "-F", "#{window_id}\t#{window_index}\t#{window_name}")
+	if err != nil {
+		return nil, err
+	}
+	return parseWindowList(out)
+}
+
+func parseWindowList(out string) ([]Window, error) {
+	var windows []Window
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("unexpected tmux list-windows output %q", line)
+		}
+		index, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("unexpected tmux window index %q", parts[1])
+		}
+		windows = append(windows, Window{ID: parts[0], Index: index, Name: parts[2]})
+	}
+	return windows, nil
+}
+
+func CapturePane(target string) (string, error) {
+	return output("tmux", "capture-pane", "-ep", "-t", target)
+}
+
 func Switch(dir, session string) error {
 	if os.Getenv("TMUX") == "" {
 		return runAttached("tmux", "new-session", "-A", "-s", session, "-c", dir)

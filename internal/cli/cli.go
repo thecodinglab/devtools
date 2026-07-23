@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -66,6 +67,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		switchCommand(a),
 		pickCommand(a),
 		sessionsCommand(),
+		sessionPreviewCommand(stdout),
 	)
 	return cmd
 }
@@ -681,6 +683,63 @@ func pickCommand(a *app) *cobra.Command {
 	}
 }
 
+func sessionPreviewCommand(stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:    "session-preview <session>",
+		Short:  "Render the fzf preview for a tmux session",
+		Hidden: true,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return errors.New("usage: devtools session-preview <session>")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			windows, err := tmux.ListWindows(args[0])
+			if err != nil {
+				return err
+			}
+			height := previewHeight()
+			for i, window := range windows {
+				lines := height / len(windows)
+				if i < height%len(windows) {
+					lines++
+				}
+				if lines < 1 {
+					break
+				}
+				fmt.Fprintf(stdout, "\x1b[1m── %d: %s ──\x1b[0m\n", window.Index, window.Name)
+				content, err := tmux.CapturePane(window.ID)
+				if err != nil {
+					return err
+				}
+				for _, line := range tailLines(content, lines-1) {
+					fmt.Fprintln(stdout, line)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func previewHeight() int {
+	if lines, err := strconv.Atoi(os.Getenv("FZF_PREVIEW_LINES")); err == nil && lines > 0 {
+		return lines
+	}
+	return 40
+}
+
+func tailLines(content string, max int) []string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > max {
+		lines = lines[len(lines)-max:]
+	}
+	return lines
+}
+
 func sessionsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "sessions",
@@ -702,7 +761,12 @@ func sessionsCommand() *cobra.Command {
 					Value: session.Name,
 				})
 			}
-			option, err := picker.SelectOption(options, "no tmux sessions found", "tmux capture-pane -ep -t {1}")
+			exe, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			preview := fmt.Sprintf("%q session-preview {1}", exe)
+			option, err := picker.SelectOption(options, "no tmux sessions found", preview)
 			if err != nil {
 				return err
 			}

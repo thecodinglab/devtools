@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -297,8 +299,12 @@ func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	gotArgs := strings.TrimSpace(string(fzfArgs))
-	wantArgs := "--with-nth=1 --delimiter=\t --preview tmux capture-pane -ep -t {1}"
+	wantArgs := fmt.Sprintf("--with-nth=1 --delimiter=\t --preview %q session-preview {1}", exe)
 	if gotArgs != wantArgs {
 		t.Fatalf("fzf args = %q, want %q", gotArgs, wantArgs)
 	}
@@ -309,6 +315,32 @@ func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("tmux commands = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionPreviewFitsAllWindowsIntoPreviewHeight(t *testing.T) {
+	log := installFakeTmuxWithWindows(t, "@1\t1\tvim\n@2\t2\tserver logs", 10)
+	t.Setenv("FZF_PREVIEW_LINES", "8")
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"session-preview", "work"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("session-preview returned %d, stderr=%s", code, stderr.String())
+	}
+	want := "\x1b[1m── 1: vim ──\x1b[0m\n" +
+		"@1 line 8\n@1 line 9\n@1 line 10\n" +
+		"\x1b[1m── 2: server logs ──\x1b[0m\n" +
+		"@2 line 8\n@2 line 9\n@2 line 10\n"
+	if stdout.String() != want {
+		t.Fatalf("preview output = %q, want %q", stdout.String(), want)
+	}
+	got := tmuxCommands(t, log)
+	wantCommands := []string{
+		"list-windows -t work -F #{window_id}\t#{window_index}\t#{window_name}",
+		"capture-pane -ep -t @1",
+		"capture-pane -ep -t @2",
+	}
+	if strings.Join(got, "\n") != strings.Join(wantCommands, "\n") {
+		t.Fatalf("tmux commands = %#v, want %#v", got, wantCommands)
 	}
 }
 
@@ -662,6 +694,24 @@ func installFakeTmuxWithSessions(t *testing.T, sessions string) string {
 	t.Setenv("TMUX_LOG", log)
 	t.Setenv("TMUX_SESSIONS", sessions)
 	t.Setenv("TMUX", "")
+	return log
+}
+
+func installFakeTmuxWithWindows(t *testing.T, windows string, paneLines int) string {
+	t.Helper()
+	bin := t.TempDir()
+	log := filepath.Join(t.TempDir(), "tmux.log")
+	fakeTmux := filepath.Join(bin, "tmux")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n" +
+		"if [ \"$1\" = \"list-windows\" ]; then\nprintf '%s\\n' \"$TMUX_WINDOWS\"\nfi\n" +
+		"if [ \"$1\" = \"capture-pane\" ]; then\ni=1\nwhile [ \"$i\" -le \"$TMUX_PANE_LINES\" ]; do\nprintf '%s line %s\\n' \"$4\" \"$i\"\ni=$((i+1))\ndone\nfi\n"
+	if err := os.WriteFile(fakeTmux, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TMUX_LOG", log)
+	t.Setenv("TMUX_WINDOWS", windows)
+	t.Setenv("TMUX_PANE_LINES", strconv.Itoa(paneLines))
 	return log
 }
 
