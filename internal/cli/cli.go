@@ -59,6 +59,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		updateCommand(a, stdout),
 		pushCommand(stdout),
 		rebaseCommand(a, stdout),
+		nukeCommand(stdout),
 		removeWorktreeCommand(a, stdout),
 		listCommand(a, stdout),
 		statusCommand(a, stdout),
@@ -370,6 +371,28 @@ func defaultBaseRef(a *app, cwd string) string {
 		return "main"
 	}
 	return branch
+}
+
+func nukeCommand(stdout io.Writer) *cobra.Command {
+	var includeIgnored bool
+	cmd := &cobra.Command{
+		Use:   "nuke",
+		Short: "Discard all changes in the current worktree",
+		Args:  usageNoArgs("usage: devtools nuke [--include-ignored]"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			if err := devgit.NukeWorktree(cwd, includeIgnored); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, cwd)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&includeIgnored, "include-ignored", false, "also remove git-ignored files")
+	return cmd
 }
 
 func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {

@@ -285,6 +285,20 @@ func PushCurrent(path string) (PushResult, error) {
 	return PushResult{Branch: branch, Upstream: upstream}, nil
 }
 
+func NukeWorktree(path string, includeIgnored bool) error {
+	if _, err := gitOutput(path, "rev-parse", "--verify", "HEAD"); err != nil {
+		return err
+	}
+	if err := git(path, "reset", "--hard", "HEAD"); err != nil {
+		return err
+	}
+	cleanArgs := []string{"clean", "-fd"}
+	if includeIgnored {
+		cleanArgs = append(cleanArgs, "-x")
+	}
+	return git(path, cleanArgs...)
+}
+
 func RebaseCurrent(path, onto string) error {
 	if onto == "" {
 		onto = "main"

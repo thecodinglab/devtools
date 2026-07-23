@@ -359,6 +359,73 @@ func TestRebaseCurrentRebasesOntoTarget(t *testing.T) {
 	}
 }
 
+func TestNukeWorktreeDiscardsChangesAndUntrackedFiles(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	cloned, err := Clone(root, remote, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, "README.md"), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, "untracked.txt"), []byte("junk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(cloned.WorktreePath, "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, ".gitignore"), []byte("ignored.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, "ignored.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NukeWorktree(cloned.WorktreePath, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := gitOut(t, cloned.WorktreePath, "status", "--porcelain", "--untracked-files=no"); strings.TrimSpace(got) != "" {
+		t.Fatalf("tracked changes remain: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(cloned.WorktreePath, "untracked.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked.txt should have been removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cloned.WorktreePath, "scratch")); !os.IsNotExist(err) {
+		t.Fatalf("scratch dir should have been removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cloned.WorktreePath, "ignored.txt")); err != nil {
+		t.Fatalf("ignored.txt should have been kept: %v", err)
+	}
+	if got := gitOut(t, cloned.WorktreePath, "show", "HEAD:README.md"); strings.TrimSpace(got) != "hello" {
+		t.Fatalf("README.md not restored: %q", got)
+	}
+}
+
+func TestNukeWorktreeIncludeIgnoredRemovesIgnoredFiles(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	cloned, err := Clone(root, remote, "widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, ".gitignore"), []byte("ignored.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cloned.WorktreePath, "ignored.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NukeWorktree(cloned.WorktreePath, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(cloned.WorktreePath, "ignored.txt")); !os.IsNotExist(err) {
+		t.Fatalf("ignored.txt should have been removed: %v", err)
+	}
+}
+
 func createRemote(t *testing.T, branch string) string {
 	t.Helper()
 	base := t.TempDir()

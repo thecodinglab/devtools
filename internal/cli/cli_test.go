@@ -312,6 +312,45 @@ func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
 	}
 }
 
+func TestNukeDiscardsWorktreeChanges(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	if err := os.WriteFile(filepath.Join(mainPath, "README.md"), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mainPath, "untracked.txt"), []byte("junk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+
+	if code := Run([]string{"nuke"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("nuke returned %d, stderr=%s", code, stderr.String())
+	}
+	wantPath, err := filepath.EvalSymlinks(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(stdout.String()) != wantPath {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), wantPath)
+	}
+	if _, err := os.Stat(filepath.Join(mainPath, "untracked.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked.txt should have been removed: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(mainPath, "README.md")); err != nil || strings.TrimSpace(string(got)) != "hello" {
+		t.Fatalf("README.md = %q (err=%v), want restored to \"hello\"", got, err)
+	}
+}
+
 func TestRemoveSwitchesToMainSessionBeforeRemovingFeature(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
