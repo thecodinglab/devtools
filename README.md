@@ -2,7 +2,14 @@
 
 `devtools` is a small Go CLI for managing development checkouts as Git worktrees and pairing each worktree with a tmux session.
 
-By default it uses `~/dev` as the workspace root. Set `DEVTOOLS_ROOT` or pass `--root PATH` to use a different workspace.
+By default it uses `~/dev` as the workspace root. Multiple roots can be configured; projects are discovered across all of them. Roots come from, in order of precedence:
+
+1. `--root PATH`, repeatable: `devtools --root ~/dev --root ~/work list`
+2. `DEVTOOLS_ROOT`, accepting a colon-separated list of paths
+3. `root` lines in the config file (see [Configuration](#configuration))
+4. `~/dev`
+
+The first root is the primary root: `new` and `clone` create projects there. All other commands search every root.
 
 ## Requirements
 
@@ -29,7 +36,7 @@ nix build
 ## Usage
 
 ```sh
-devtools [--root PATH] <command> [args]
+devtools [--root PATH]... <command> [args]
 ```
 
 Commands:
@@ -49,6 +56,9 @@ devtools status [--all]
 devtools switch [path-or-query]
 devtools pick
 devtools sessions
+devtools bookmark add <name> [path]
+devtools bookmark remove <name>
+devtools bookmark list
 ```
 
 Common flow:
@@ -124,7 +134,7 @@ devtools merge --squash
 
 ### `update`
 
-Fetches from `origin` and fast-forwards the current project's `main` or `master` worktree. The main worktree must be clean. Pass `--all` to update main worktrees for all managed projects under the workspace root.
+Fetches from `origin` and fast-forwards the current project's `main` or `master` worktree. The main worktree must be clean. Pass `--all` to update main worktrees for all managed projects under all workspace roots.
 
 ```sh
 devtools update
@@ -162,7 +172,7 @@ Removing `main` or `master` requires `--allow-main`.
 
 ### `list`
 
-Lists discovered worktrees under the workspace root.
+Lists discovered worktrees under all workspace roots, plus any bookmarks.
 
 ```sh
 devtools list
@@ -172,7 +182,7 @@ devtools list
 
 Shows a compact dashboard with branch, clean or dirty state, ahead/behind counts, and upstream. Untracked files are ignored when computing the dirty state.
 
-When run from inside a managed worktree, only worktrees for that project are shown. From outside a managed project, the whole workspace root is shown. Pass `--all` to show the whole workspace root from anywhere.
+When run from inside a managed worktree, only worktrees for that project are shown. From outside a managed project, all workspace roots are shown. Pass `--all` to show all workspace roots from anywhere. Bookmarks are not included.
 
 ```sh
 devtools status
@@ -205,6 +215,36 @@ Opens an interactive picker for active tmux sessions and switches to the selecte
 ```sh
 devtools sessions
 ```
+
+### `bookmark`
+
+Manages named bookmarks for directories that do not follow the managed bare-worktree layout, like a dotfiles checkout or a notes directory. Bookmarks show up in `list`, `switch`, and `pick` alongside discovered worktrees, and their tmux session is named after the bookmark.
+
+`add` stores the given path, or the current directory when the path is omitted. Bookmarks are stored in the config file.
+
+```sh
+devtools bookmark add dotfiles ~/.dotfiles
+devtools bookmark add notes
+devtools bookmark list
+devtools bookmark remove notes
+devtools switch dotfiles
+```
+
+## Configuration
+
+devtools reads an optional config file from `$DEVTOOLS_CONFIG`, falling back to `$XDG_CONFIG_HOME/devtools/config` and then `~/.config/devtools/config`. The format is line-based; blank lines and lines starting with `#` are ignored:
+
+```text
+# workspace roots, searched in order; the first is the primary root
+root ~/dev
+root ~/work
+
+# name followed by path; paths may contain spaces
+bookmark dotfiles ~/.dotfiles
+bookmark notes ~/Documents/notes
+```
+
+`root` lines are used only when neither `--root` nor `DEVTOOLS_ROOT` is set. `bookmark` lines are managed by `devtools bookmark add` and `devtools bookmark remove`, but can also be edited by hand.
 
 ## Development
 

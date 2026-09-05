@@ -11,6 +11,18 @@ import (
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	tmp, err := os.MkdirTemp("", "devtools-cli-test")
+	if err != nil {
+		panic(err)
+	}
+	// Keep tests hermetic: never read the developer's real config file.
+	os.Setenv("DEVTOOLS_CONFIG", filepath.Join(tmp, "config"))
+	code := m.Run()
+	os.RemoveAll(tmp)
+	os.Exit(code)
+}
+
 func TestSwitchUsesFakeTmuxForNormalRepo(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "small")
@@ -44,6 +56,191 @@ func TestListAcceptsRootPersistentFlag(t *testing.T) {
 		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
 	}
 	want := "small\t" + project
+	if strings.TrimSpace(stdout.String()) != want {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), want)
+	}
+}
+
+func TestListMergesMultipleRootsFromEnv(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	alphaPath := filepath.Join(rootA, "alpha")
+	betaPath := filepath.Join(rootB, "beta")
+	makeRepo(t, alphaPath)
+	makeRepo(t, betaPath)
+	t.Setenv("DEVTOOLS_ROOT", rootA+string(os.PathListSeparator)+rootB)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
+	}
+	want := "alpha\t" + alphaPath + "\nbeta\t" + betaPath
+	if strings.TrimSpace(stdout.String()) != want {
+		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), want)
+	}
+}
+
+func TestConfigFileDefinesRootsAndBookmarks(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	alphaPath := filepath.Join(rootA, "alpha")
+	betaPath := filepath.Join(rootB, "beta")
+	makeRepo(t, alphaPath)
+	makeRepo(t, betaPath)
+	notesPath := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "config")
+	cfg := "# devtools config\nroot " + rootA + "\nroot " + rootB + "\nbookmark notes " + notesPath + "\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEVTOOLS_CONFIG", cfgPath)
+	t.Setenv("DEVTOOLS_ROOT", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("list returned %d, stderr=%s", code, stderr.String())
+	}
+	got := strings.TrimSpace(stdout.String())
+	for _, want := range []string{"alpha\t" + alphaPath, "beta\t" + betaPath, "notes\t" + notesPath} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("list output = %q, want it to contain %q", got, want)
+		}
+	}
+
+	changeCwd(t, t.TempDir())
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"status"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("status returned %d, stderr=%s", code, stderr.String())
+	}
+	got = strings.TrimSpace(stdout.String())
+	if !strings.Contains(got, "alpha") || !strings.Contains(got, "beta") {
+		t.Fatalf("status output = %q, want repos from both roots", got)
+	}
+	if strings.Contains(got, "notes") {
+		t.Fatalf("status output = %q, want bookmarks excluded", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	overrideRoot := t.TempDir()
+	gammaPath := filepath.Join(overrideRoot, "gamma")
+	makeRepo(t, gammaPath)
+	if code := Run([]string{"list", "--root", overrideRoot}, &stdout, &stderr); code != 0 {
+		t.Fatalf("list --root returned %d, stderr=%s", code, stderr.String())
+	}
+	got = strings.TrimSpace(stdout.String())
+	if !strings.Contains(got, "gamma\t"+gammaPath) || strings.Contains(got, "alpha") {
+		t.Fatalf("list --root output = %q, want only gamma plus bookmarks", got)
+	}
+}
+
+func TestSwitchToBookmarkUsesBookmarkNameAsSession(t *testing.T) {
+	root := t.TempDir()
+	notesPath := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(cfgPath, []byte("bookmark notes "+notesPath+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEVTOOLS_CONFIG", cfgPath)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	log := installFakeTmux(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"switch", "notes"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
+	}
+	out, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(strings.Fields(string(out)), " ")
+	want := "new-session -A -s notes -c " + notesPath
+	if got != want {
+		t.Fatalf("tmux args = %q, want %q", got, want)
+	}
+}
+
+func TestBookmarkAddListRemoveManageConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "devtools", "config")
+	t.Setenv("DEVTOOLS_CONFIG", cfgPath)
+	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
+	notesPath := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"bookmark", "add", "notes", notesPath}, &stdout, &stderr); code != 0 {
+		t.Fatalf("bookmark add returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "notes\t"+notesPath {
+		t.Fatalf("bookmark add stdout = %q", strings.TrimSpace(stdout.String()))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"bookmark", "add", "notes", notesPath}, &stdout, &stderr); code == 0 {
+		t.Fatal("duplicate bookmark add should fail")
+	}
+	if !strings.Contains(stderr.String(), "already exists") {
+		t.Fatalf("stderr = %q, want already exists", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"bookmark", "add", "missing", filepath.Join(notesPath, "nope")}, &stdout, &stderr); code == 0 {
+		t.Fatal("bookmark add for missing directory should fail")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"bookmark", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("bookmark list returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "notes\t"+notesPath {
+		t.Fatalf("bookmark list stdout = %q", strings.TrimSpace(stdout.String()))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"bookmark", "remove", "notes"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("bookmark remove returned %d, stderr=%s", code, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"bookmark", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("bookmark list returned %d, stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("bookmark list after remove = %q, want empty", strings.TrimSpace(stdout.String()))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"bookmark", "remove", "notes"}, &stdout, &stderr); code == 0 {
+		t.Fatal("removing a missing bookmark should fail")
+	}
+}
+
+func TestWorkInfersProjectInSecondaryRoot(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	var stdout, stderr bytes.Buffer
+
+	t.Setenv("DEVTOOLS_ROOT", rootB)
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	t.Setenv("DEVTOOLS_ROOT", rootA+string(os.PathListSeparator)+rootB)
+	changeCwd(t, filepath.Join(rootB, "widgets", "main"))
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"work", "feature/multi"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	want := filepath.Join(rootB, "widgets", "feature-multi")
 	if strings.TrimSpace(stdout.String()) != want {
 		t.Fatalf("stdout = %q, want %q", strings.TrimSpace(stdout.String()), want)
 	}

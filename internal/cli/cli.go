@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 
+	"devtools/internal/config"
 	"devtools/internal/devgit"
 	"devtools/internal/discovery"
 	"devtools/internal/picker"
@@ -20,7 +22,12 @@ import (
 )
 
 type globals struct {
-	root string
+	roots     []string
+	bookmarks []config.Bookmark
+}
+
+func (g globals) primaryRoot() string {
+	return g.roots[0]
 }
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -34,13 +41,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 type app struct {
-	root string
+	roots []string
 }
 
 func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
-	a := &app{root: defaultRoot()}
+	a := &app{}
 	cmd := &cobra.Command{
-		Use:           "devtools [--root PATH] <command> [args]",
+		Use:           "devtools [--root PATH]... <command> [args]",
 		Short:         "Manage dev worktrees and tmux sessions",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -50,7 +57,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.PersistentFlags().StringVar(&a.root, "root", a.root, "workspace root")
+	cmd.PersistentFlags().StringArrayVar(&a.roots, "root", nil, "workspace root (repeatable; overrides DEVTOOLS_ROOT and config roots)")
 	cmd.AddCommand(
 		newProjectCommand(a, stdout),
 		cloneCommand(a, stdout),
@@ -66,6 +73,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		statusCommand(a, stdout),
 		switchCommand(a),
 		pickCommand(a),
+		bookmarkCommand(a, stdout),
 		sessionsCommand(),
 		sessionPreviewCommand(stdout),
 	)
@@ -73,18 +81,117 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 }
 
 func (a *app) globals() (globals, error) {
-	root, err := expandPath(a.root)
+	cfgPath, err := config.Path()
 	if err != nil {
 		return globals{}, err
 	}
-	return globals{root: root}, nil
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return globals{}, err
+	}
+	roots := a.roots
+	if len(roots) == 0 {
+		if env := os.Getenv("DEVTOOLS_ROOT"); env != "" {
+			roots = filepath.SplitList(env)
+		}
+	}
+	if len(roots) == 0 {
+		roots = cfg.Roots
+	}
+	if len(roots) == 0 {
+		roots = []string{"~/dev"}
+	}
+	var g globals
+	seen := map[string]bool{}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		abs, err := expandPath(root)
+		if err != nil {
+			return globals{}, err
+		}
+		if seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		g.roots = append(g.roots, abs)
+	}
+	if len(g.roots) == 0 {
+		return globals{}, errors.New("no workspace roots configured")
+	}
+	for _, bookmark := range cfg.Bookmarks {
+		abs, err := expandPath(bookmark.Path)
+		if err != nil {
+			return globals{}, err
+		}
+		g.bookmarks = append(g.bookmarks, config.Bookmark{Name: bookmark.Name, Path: abs})
+	}
+	return g, nil
 }
 
-func defaultRoot() string {
-	if root := os.Getenv("DEVTOOLS_ROOT"); root != "" {
-		return root
+func scanTargets(g globals) ([]discovery.Target, error) {
+	var targets []discovery.Target
+	seen := map[string]bool{}
+	for _, root := range g.roots {
+		scanned, err := discovery.Scan(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, target := range scanned {
+			if seen[target.Path] {
+				continue
+			}
+			seen[target.Path] = true
+			targets = append(targets, target)
+		}
 	}
-	return "~/dev"
+	sortTargets(targets)
+	return targets, nil
+}
+
+func withBookmarks(targets []discovery.Target, bookmarks []config.Bookmark) []discovery.Target {
+	for _, bookmark := range bookmarks {
+		if stat, err := os.Stat(bookmark.Path); err != nil || !stat.IsDir() {
+			continue
+		}
+		targets = append(targets, discovery.Target{
+			Label:   bookmark.Name,
+			Project: bookmark.Name,
+			Path:    bookmark.Path,
+			Kind:    "bookmark",
+		})
+	}
+	sortTargets(targets)
+	return targets
+}
+
+func sortTargets(targets []discovery.Target) {
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].Label < targets[j].Label
+	})
+}
+
+func inferProject(g globals, cwd string) (string, string, error) {
+	for _, root := range g.roots {
+		project, err := devgit.InferProject(root, cwd)
+		if err == nil {
+			return root, project, nil
+		}
+	}
+	return "", "", fmt.Errorf("%s is not inside a managed project under any workspace root (%s)", cwd, strings.Join(g.roots, ", "))
+}
+
+func inferProjectWorktree(g globals, cwd string) (string, string, string, error) {
+	root, _, err := inferProject(g, cwd)
+	if err != nil {
+		return "", "", "", err
+	}
+	project, worktree, err := devgit.InferProjectWorktree(root, cwd)
+	if err != nil {
+		return "", "", "", err
+	}
+	return root, project, worktree, nil
 }
 
 func expandPath(path string) (string, error) {
@@ -112,7 +219,7 @@ func newProjectCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := devgit.InitProject(g.root, args[0])
+			result, err := devgit.InitProject(g.primaryRoot(), args[0])
 			if err != nil {
 				return err
 			}
@@ -136,7 +243,7 @@ func cloneCommand(a *app, stdout io.Writer) *cobra.Command {
 			if len(args) == 2 {
 				project = args[1]
 			}
-			result, err := devgit.Clone(g.root, args[0], project)
+			result, err := devgit.Clone(g.primaryRoot(), args[0], project)
 			if err != nil {
 				return err
 			}
@@ -188,7 +295,7 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project, err := devgit.InferProject(g.root, cwd)
+			root, project, err := inferProject(g, cwd)
 			if err != nil {
 				return err
 			}
@@ -199,7 +306,7 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 					return err
 				}
 			}
-			result, err := devgit.AddWorktree(g.root, project, args[0], startPoint)
+			result, err := devgit.AddWorktree(root, project, args[0], startPoint)
 			if err != nil {
 				return err
 			}
@@ -226,11 +333,11 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project, worktree, err := devgit.InferProjectWorktree(g.root, cwd)
+			root, project, worktree, err := inferProjectWorktree(g, cwd)
 			if err != nil {
 				return err
 			}
-			result, err := devgit.MergeWorktreeToMain(g.root, project, worktree, devgit.MergeOptions{
+			result, err := devgit.MergeWorktreeToMain(root, project, worktree, devgit.MergeOptions{
 				Squash: squash,
 			})
 			if err != nil {
@@ -245,7 +352,7 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			_, err = devgit.RemoveWorktree(g.root, project, worktree, devgit.RemoveOptions{
+			_, err = devgit.RemoveWorktree(root, project, worktree, devgit.RemoveOptions{
 				Force:        true,
 				DeleteBranch: true,
 			})
@@ -272,17 +379,22 @@ func updateCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			if all {
-				return updateAllMainWorktrees(g.root, stdout)
+				for _, root := range g.roots {
+					if err := updateAllMainWorktrees(root, stdout); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
-			project, err := devgit.InferProject(g.root, cwd)
+			root, project, err := inferProject(g, cwd)
 			if err != nil {
 				return err
 			}
-			result, err := devgit.UpdateMainWorktree(g.root, project)
+			result, err := devgit.UpdateMainWorktree(root, project)
 			if err != nil {
 				return err
 			}
@@ -364,11 +476,11 @@ func defaultBaseRef(a *app, cwd string) string {
 	if err != nil {
 		return "main"
 	}
-	project, err := devgit.InferProject(g.root, cwd)
+	root, project, err := inferProject(g, cwd)
 	if err != nil {
 		return "main"
 	}
-	branch, err := devgit.MainBranch(g.root, project)
+	branch, err := devgit.MainBranch(root, project)
 	if err != nil {
 		return "main"
 	}
@@ -412,7 +524,7 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project, worktree, err := devgit.InferProjectWorktree(g.root, cwd)
+			root, project, worktree, err := inferProjectWorktree(g, cwd)
 			if err != nil {
 				return err
 			}
@@ -424,11 +536,11 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 				DeleteBranch: !keepBranch,
 				AllowMain:    allowMain,
 			}
-			plan, err := devgit.PlanRemoveWorktree(g.root, project, worktree, opts)
+			plan, err := devgit.PlanRemoveWorktree(root, project, worktree, opts)
 			if err != nil {
 				return err
 			}
-			fallbackWorktree, fallbackPath := removalFallback(g.root, project, plan.Worktree)
+			fallbackWorktree, fallbackPath := removalFallback(root, project, plan.Worktree)
 			restoreHangup := ignoreHangup()
 			defer restoreHangup()
 			if err := tmux.CloseForRemoval(
@@ -438,7 +550,7 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			result, err := devgit.RemoveWorktree(g.root, project, worktree, opts)
+			result, err := devgit.RemoveWorktree(root, project, worktree, opts)
 			if err != nil {
 				return err
 			}
@@ -486,10 +598,11 @@ func listCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targets, err := discovery.Scan(g.root)
+			targets, err := scanTargets(g)
 			if err != nil {
 				return err
 			}
+			targets = withBookmarks(targets, g.bookmarks)
 			for _, target := range targets {
 				fmt.Fprintf(stdout, "%s\t%s\n", target.Label, target.Path)
 			}
@@ -509,7 +622,7 @@ func statusCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targets, err := discovery.Scan(g.root)
+			targets, err := scanTargets(g)
 			if err != nil {
 				return err
 			}
@@ -634,10 +747,11 @@ func switchCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targets, err := discovery.Scan(g.root)
+			targets, err := scanTargets(g)
 			if err != nil {
 				return err
 			}
+			targets = withBookmarks(targets, g.bookmarks)
 			var target discovery.Target
 			if len(args) == 0 {
 				target, err = picker.Select(targets)
@@ -670,10 +784,11 @@ func pickCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targets, err := discovery.Scan(g.root)
+			targets, err := scanTargets(g)
 			if err != nil {
 				return err
 			}
+			targets = withBookmarks(targets, g.bookmarks)
 			target, err := picker.Select(targets)
 			if err != nil {
 				return err
@@ -738,6 +853,93 @@ func tailLines(content string, max int) []string {
 		lines = lines[len(lines)-max:]
 	}
 	return lines
+}
+
+func bookmarkCommand(a *app, stdout io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "bookmark <command>",
+		Short: "Manage bookmarked directories",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(
+		bookmarkAddCommand(stdout),
+		bookmarkRemoveCommand(stdout),
+		bookmarkListCommand(a, stdout),
+	)
+	return cmd
+}
+
+func bookmarkAddCommand(stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "add <name> [path]",
+		Short: "Bookmark a directory",
+		Args:  usageArgRange(1, 2, "usage: devtools bookmark add <name> [path]"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			if strings.ContainsAny(name, " \t") {
+				return fmt.Errorf("bookmark name %q must not contain whitespace", name)
+			}
+			path := "."
+			if len(args) == 2 {
+				path = args[1]
+			}
+			abs, err := expandPath(path)
+			if err != nil {
+				return err
+			}
+			if stat, err := os.Stat(abs); err != nil || !stat.IsDir() {
+				return fmt.Errorf("%s is not a directory", abs)
+			}
+			cfgPath, err := config.Path()
+			if err != nil {
+				return err
+			}
+			if err := config.AddBookmark(cfgPath, name, abs); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "%s\t%s\n", name, abs)
+			return nil
+		},
+	}
+}
+
+func bookmarkRemoveCommand(stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove <name>",
+		Short: "Remove a bookmark",
+		Args:  usageExactArgs(1, "usage: devtools bookmark remove <name>"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfgPath, err := config.Path()
+			if err != nil {
+				return err
+			}
+			if err := config.RemoveBookmark(cfgPath, args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, args[0])
+			return nil
+		},
+	}
+}
+
+func bookmarkListCommand(a *app, stdout io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List bookmarks",
+		Args:  usageNoArgs("usage: devtools bookmark list"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			g, err := a.globals()
+			if err != nil {
+				return err
+			}
+			for _, bookmark := range g.bookmarks {
+				fmt.Fprintf(stdout, "%s\t%s\n", bookmark.Name, bookmark.Path)
+			}
+			return nil
+		},
+	}
 }
 
 func sessionsCommand() *cobra.Command {
