@@ -2,6 +2,8 @@
 
 `devtools` is a small Go CLI for managing development checkouts as Git worktrees and pairing each worktree with a tmux session.
 
+Inside [herdr](https://herdr.dev) (and not in a tmux nested in it), each session is a herdr workspace instead: it's labeled with the session name, switching focuses it or creates it in the worktree, removing a worktree closes it, and `sessions` picks between the open workspaces.
+
 By default it uses `~/dev` as the workspace root. Multiple roots can be configured; projects are discovered across all of them. Roots come from, in order of precedence:
 
 1. `--root PATH`, repeatable: `devtools --root ~/dev --root ~/work list`
@@ -15,7 +17,7 @@ The first root is the primary root: `new` and `clone` create projects there. All
 
 - Go 1.26 or newer
 - Git
-- tmux
+- tmux, or herdr
 - fzf, for interactive picking with `devtools pick`, `devtools sessions`, or ambiguous `devtools switch` queries
 - Nix, optional, for the provided dev shell and package build
 

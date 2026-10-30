@@ -15,6 +15,7 @@ import (
 	"devtools/internal/config"
 	"devtools/internal/devgit"
 	"devtools/internal/discovery"
+	"devtools/internal/herdr"
 	"devtools/internal/picker"
 	"devtools/internal/tmux"
 
@@ -224,7 +225,7 @@ func newProjectCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.ProjectPath)
-			return tmux.Switch(result.ProjectPath, tmux.SessionName(result.Project, result.Worktree))
+			return switchSession(result.ProjectPath, tmux.SessionName(result.Project, result.Worktree))
 		},
 	}
 }
@@ -248,7 +249,7 @@ func cloneCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return tmux.Switch(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
+			return switchSession(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
 		},
 	}
 }
@@ -273,7 +274,7 @@ func migrateCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return tmux.Switch(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
+			return switchSession(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
 		},
 	}
 	cmd.Flags().BoolVar(&allowDirty, "allow-dirty", false, "allow migrating a dirty checkout")
@@ -311,7 +312,7 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return tmux.Switch(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
+			return switchSession(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "start point")
@@ -345,11 +346,12 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			}
 			restoreHangup := ignoreHangup()
 			defer restoreHangup()
-			if err := tmux.CloseForRemoval(
+			closeSession, err := closeForRemoval(
 				tmux.SessionName(result.Project, result.Worktree),
 				tmux.SessionName(result.Project, result.MainWorktree),
 				result.MainWorktreePath,
-			); err != nil {
+			)
+			if err != nil {
 				return err
 			}
 			_, err = devgit.RemoveWorktree(root, project, worktree, devgit.RemoveOptions{
@@ -360,7 +362,7 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.MainWorktreePath)
-			return nil
+			return closeSession()
 		},
 	}
 	cmd.Flags().BoolVar(&squash, "squash", false, "squash the worktree branch into a single commit")
@@ -543,11 +545,12 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 			fallbackWorktree, fallbackPath := removalFallback(root, project, plan.Worktree)
 			restoreHangup := ignoreHangup()
 			defer restoreHangup()
-			if err := tmux.CloseForRemoval(
+			closeSession, err := closeForRemoval(
 				tmux.SessionName(plan.Project, plan.Worktree),
 				tmux.SessionName(plan.Project, fallbackWorktree),
 				fallbackPath,
-			); err != nil {
+			)
+			if err != nil {
 				return err
 			}
 			result, err := devgit.RemoveWorktree(root, project, worktree, opts)
@@ -555,7 +558,7 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return nil
+			return closeSession()
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove without clean/pushed checks")
@@ -769,7 +772,7 @@ func switchCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return tmux.Switch(target.Path, tmux.SessionName(target.Project, target.Worktree))
+			return switchSession(target.Path, tmux.SessionName(target.Project, target.Worktree))
 		},
 	}
 }
@@ -793,7 +796,7 @@ func pickCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return tmux.Switch(target.Path, tmux.SessionName(target.Project, target.Worktree))
+			return switchSession(target.Path, tmux.SessionName(target.Project, target.Worktree))
 		},
 	}
 }
@@ -801,7 +804,7 @@ func pickCommand(a *app) *cobra.Command {
 func sessionPreviewCommand(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:    "session-preview <session>",
-		Short:  "Render the fzf preview for a tmux session",
+		Short:  "Render the fzf preview for a tmux session or herdr workspace",
 		Hidden: true,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
@@ -810,21 +813,21 @@ func sessionPreviewCommand(stdout io.Writer) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			windows, err := tmux.ListWindows(args[0])
+			sections, err := sessionPreviewSections(args[0])
 			if err != nil {
 				return err
 			}
 			height := previewHeight()
-			for i, window := range windows {
-				lines := height / len(windows)
-				if i < height%len(windows) {
+			for i, section := range sections {
+				lines := height / len(sections)
+				if i < height%len(sections) {
 					lines++
 				}
 				if lines < 1 {
 					break
 				}
-				fmt.Fprintf(stdout, "\x1b[1m── %d: %s ──\x1b[0m\n", window.Index, window.Name)
-				content, err := tmux.CapturePane(window.ID)
+				fmt.Fprintf(stdout, "\x1b[1m── %s ──\x1b[0m\n", section.title)
+				content, err := section.capture()
 				if err != nil {
 					return err
 				}
@@ -835,6 +838,53 @@ func sessionPreviewCommand(stdout io.Writer) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// previewSection is a tmux window or herdr tab in the session preview.
+type previewSection struct {
+	title   string
+	capture func() (string, error)
+}
+
+func sessionPreviewSections(session string) ([]previewSection, error) {
+	if herdr.Active() {
+		tabs, err := herdr.ListTabs(session)
+		if err != nil {
+			return nil, err
+		}
+		panes, err := herdr.TabPanes(session)
+		if err != nil {
+			return nil, err
+		}
+		sections := make([]previewSection, 0, len(tabs))
+		for _, tab := range tabs {
+			tabPanes := panes[tab.ID]
+			sections = append(sections, previewSection{
+				title: fmt.Sprintf("%d: %s", tab.Number, tab.Label),
+				capture: func() (string, error) {
+					if len(tabPanes) == 0 {
+						return "", nil
+					}
+					return herdr.CapturePane(tabPanes[0])
+				},
+			})
+		}
+		return sections, nil
+	}
+	windows, err := tmux.ListWindows(session)
+	if err != nil {
+		return nil, err
+	}
+	sections := make([]previewSection, 0, len(windows))
+	for _, window := range windows {
+		sections = append(sections, previewSection{
+			title: fmt.Sprintf("%d: %s", window.Index, window.Name),
+			capture: func() (string, error) {
+				return tmux.CapturePane(window.ID)
+			},
+		})
+	}
+	return sections, nil
 }
 
 func previewHeight() int {
@@ -945,9 +995,12 @@ func bookmarkListCommand(a *app, stdout io.Writer) *cobra.Command {
 func sessionsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "sessions",
-		Short: "Pick an active tmux session",
+		Short: "Pick an active tmux session or herdr workspace",
 		Args:  usageNoArgs("usage: devtools sessions"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if herdr.Active() {
+				return pickWorkspace()
+			}
 			sessions, err := tmux.ListSessions()
 			if err != nil {
 				return err
@@ -975,6 +1028,52 @@ func sessionsCommand() *cobra.Command {
 			return tmux.SwitchSession(option.Value)
 		},
 	}
+}
+
+func pickWorkspace() error {
+	workspaces, err := herdr.ListWorkspaces()
+	if err != nil {
+		return err
+	}
+	options := make([]picker.Option, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		// labels need not be unique, the id makes every line distinct
+		label := fmt.Sprintf("%s\t%d tabs\t%s", workspace.Label, workspace.Tabs, workspace.ID)
+		if workspace.Focused {
+			label += "\tfocused"
+		}
+		options = append(options, picker.Option{
+			Label: label,
+			Value: workspace.ID,
+		})
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	preview := fmt.Sprintf("%q session-preview {3}", exe)
+	option, err := picker.SelectOption(options, "no herdr workspaces found", preview)
+	if err != nil {
+		return err
+	}
+	return herdr.SwitchWorkspace(option.Value)
+}
+
+// sessions live in herdr when devtools runs inside it, in tmux otherwise
+func switchSession(dir, session string) error {
+	if herdr.Active() {
+		return herdr.Switch(dir, session)
+	}
+	return tmux.Switch(dir, session)
+}
+
+// closeForRemoval leaves the session of a worktree about to be removed, the
+// returned function finishes closing it once the worktree is gone
+func closeForRemoval(targetSession, fallbackSession, fallbackDir string) (func() error, error) {
+	if herdr.Active() {
+		return herdr.CloseForRemoval(targetSession, fallbackSession, fallbackDir)
+	}
+	return func() error { return nil }, tmux.CloseForRemoval(targetSession, fallbackSession, fallbackDir)
 }
 
 func usageNoArgs(usage string) cobra.PositionalArgs {

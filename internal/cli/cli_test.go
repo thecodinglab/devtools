@@ -18,6 +18,10 @@ func TestMain(m *testing.M) {
 	}
 	// Keep tests hermetic: never read the developer's real config file.
 	os.Setenv("DEVTOOLS_CONFIG", filepath.Join(tmp, "config"))
+	// Nor drive the herdr session the tests may run in.
+	for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+		os.Unsetenv(name)
+	}
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)
@@ -43,6 +47,66 @@ func TestSwitchUsesFakeTmuxForNormalRepo(t *testing.T) {
 	want := "new-session -A -s small-main -c " + project
 	if got != want {
 		t.Fatalf("tmux args = %q, want %q", got, want)
+	}
+}
+
+func TestSwitchCreatesHerdrWorkspace(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "small")
+	makeRepo(t, project)
+
+	log := installFakeHerdr(t, `{"label":"other","workspace_id":"w1"}`)
+	t.Setenv("DEVTOOLS_ROOT", root)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
+	}
+	got := readLog(t, log)
+	want := "workspace list\nworkspace create --cwd " + project + " --label small-main --focus"
+	if got != want {
+		t.Fatalf("herdr args = %q, want %q", got, want)
+	}
+}
+
+func TestSwitchFocusesExistingHerdrWorkspace(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "small")
+	makeRepo(t, project)
+
+	log := installFakeHerdr(t, `{"label":"other","workspace_id":"w1"},{"label":"small-main","workspace_id":"w2"}`)
+	t.Setenv("DEVTOOLS_ROOT", root)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
+	}
+	got := readLog(t, log)
+	want := "workspace list\nworkspace focus w2"
+	if got != want {
+		t.Fatalf("herdr args = %q, want %q", got, want)
+	}
+}
+
+func TestSwitchPrefersTmuxNestedInHerdr(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "small")
+	makeRepo(t, project)
+
+	herdrLog := installFakeHerdr(t, "")
+	tmuxLog := installFakeTmux(t)
+	t.Setenv("TMUX", "/tmp/tmux-501/default,1,0")
+	t.Setenv("DEVTOOLS_ROOT", root)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
+	}
+	if got := readLog(t, herdrLog); got != "" {
+		t.Fatalf("herdr args = %q, want none", got)
+	}
+	if got := readLog(t, tmuxLog); !strings.Contains(got, "switch-client -t small-main") {
+		t.Fatalf("tmux args = %q, want a switch-client", got)
 	}
 }
 
@@ -722,6 +786,47 @@ func TestMergeMergesCurrentWorktreeIntoMainAndRemovesIt(t *testing.T) {
 	}
 }
 
+func TestMergeMovesToMainHerdrWorkspaceAndClosesWorktreeWorkspace(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	log := installFakeHerdr(t, `{"label":"widgets-main","workspace_id":"w1"},{"label":"widgets-feature-test","workspace_id":"w2"}`)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	if err := os.WriteFile(filepath.Join(featurePath, "feature.txt"), []byte("merged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, featurePath, "add", "feature.txt")
+	gitCmd(t, featurePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feature")
+
+	changeCwd(t, featurePath)
+	t.Setenv("HERDR_KILLS_IN", featurePath)
+	clearFile(t, log)
+	stdout.Reset()
+	stderr.Reset()
+
+	if code := Run([]string{"merge"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("merge returned %d, stderr=%s", code, stderr.String())
+	}
+	if _, err := os.Stat(featurePath); !os.IsNotExist(err) {
+		t.Fatalf("expected feature worktree to be removed, err=%v", err)
+	}
+	got := readLog(t, log)
+	want := "workspace list\nworkspace list\nworkspace focus w1\nworkspace close w2"
+	if got != want {
+		t.Fatalf("herdr args = %q, want %q", got, want)
+	}
+}
+
 func TestMergeSquashCreatesSingleCommitWithEditorMessage(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
@@ -876,6 +981,39 @@ func installFakeTmux(t *testing.T) string {
 	t.Setenv("TMUX_LOG", log)
 	t.Setenv("TMUX", "")
 	return log
+}
+
+// installFakeHerdr runs devtools as if inside herdr, with the given
+// comma-separated workspace objects as open workspaces.
+func installFakeHerdr(t *testing.T, workspaces string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "herdr")
+	log := filepath.Join(t.TempDir(), "herdr.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HERDR_LOG\"\n" +
+		// herdr kills the processes of a closed workspace, devtools included
+		"if [ \"$1 $2\" = \"workspace close\" ] && [ -e \"$HERDR_KILLS_IN\" ]; then\necho 'killed devtools' >&2\nexit 1\nfi\n" +
+		"if [ \"$1 $2\" = \"workspace list\" ]; then\nprintf '{\"result\":{\"workspaces\":[%s]}}\\n' \"$HERDR_WORKSPACES\"\nfi\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_BIN_PATH", bin)
+	t.Setenv("HERDR_LOG", log)
+	t.Setenv("HERDR_WORKSPACES", workspaces)
+	t.Setenv("TMUX", "")
+	return log
+}
+
+func readLog(t *testing.T, path string) string {
+	t.Helper()
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func installFakeTmuxWithSessions(t *testing.T, sessions string) string {
