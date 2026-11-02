@@ -105,3 +105,23 @@ func TestRemoveBookmarkDropsOnlyMatchingLine(t *testing.T) {
 		t.Fatalf("err = %v, want not found", err)
 	}
 }
+
+func TestLoadParsesMultiplexer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte("multiplexer tmux\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Multiplexer != "tmux" {
+		t.Fatalf("multiplexer = %q, want tmux", cfg.Multiplexer)
+	}
+	if err := os.WriteFile(path, []byte("multiplexer screen\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "multiplexer must be tmux or herdr") {
+		t.Fatalf("err = %v, want invalid multiplexer", err)
+	}
+}

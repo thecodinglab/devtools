@@ -13,8 +13,9 @@ type Bookmark struct {
 }
 
 type Config struct {
-	Roots     []string
-	Bookmarks []Bookmark
+	Roots       []string
+	Bookmarks   []Bookmark
+	Multiplexer string
 }
 
 func Path() (string, error) {
@@ -62,6 +63,11 @@ func parse(path, content string) (Config, error) {
 				return Config{}, fmt.Errorf("%s:%d: bookmark requires a name and a path", path, i+1)
 			}
 			cfg.Bookmarks = append(cfg.Bookmarks, Bookmark{Name: name, Path: target})
+		case "multiplexer":
+			if rest != "tmux" && rest != "herdr" {
+				return Config{}, fmt.Errorf("%s:%d: multiplexer must be tmux or herdr", path, i+1)
+			}
+			cfg.Multiplexer = rest
 		default:
 			return Config{}, fmt.Errorf("%s:%d: unknown directive %q", path, i+1, directive)
 		}

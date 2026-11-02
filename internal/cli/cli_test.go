@@ -18,10 +18,12 @@ func TestMain(m *testing.M) {
 	}
 	// Keep tests hermetic: never read the developer's real config file.
 	os.Setenv("DEVTOOLS_CONFIG", filepath.Join(tmp, "config"))
-	// Nor drive the herdr session the tests may run in.
-	for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+	// Nor drive the herdr session the tests may run in: without a fake herdr
+	// the missing binary makes devtools fall back to the fake tmux.
+	for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_SESSION", "DEVTOOLS_MULTIPLEXER", "TMUX"} {
 		os.Unsetenv(name)
 	}
+	os.Setenv("HERDR_BIN_PATH", filepath.Join(tmp, "no-herdr"))
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)
@@ -984,15 +986,26 @@ func installFakeTmux(t *testing.T) string {
 }
 
 // installFakeHerdr runs devtools as if inside herdr, with the given
-// comma-separated workspace objects as open workspaces.
+// comma-separated workspace objects as open workspaces. Agents, machines and
+// pane output come from HERDR_AGENTS, HERDR_MACHINES and HERDR_PANE_LINES.
 func installFakeHerdr(t *testing.T, workspaces string) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "herdr")
 	log := filepath.Join(t.TempDir(), "herdr.log")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HERDR_LOG\"\n" +
+	script := "#!/bin/sh\nif [ $# -eq 0 ]; then echo '<attach>' >> \"$HERDR_LOG\"; else printf '%s\\n' \"$*\" >> \"$HERDR_LOG\"; fi\n" +
+		"if [ \"$1\" = --machine ]; then shift 2; fi\n" +
 		// herdr kills the processes of a closed workspace, devtools included
 		"if [ \"$1 $2\" = \"workspace close\" ] && [ -e \"$HERDR_KILLS_IN\" ]; then\necho 'killed devtools' >&2\nexit 1\nfi\n" +
-		"if [ \"$1 $2\" = \"workspace list\" ]; then\nprintf '{\"result\":{\"workspaces\":[%s]}}\\n' \"$HERDR_WORKSPACES\"\nfi\n"
+		"case \"$1 $2\" in\n" +
+		"'workspace list') printf '{\"result\":{\"workspaces\":[%s]}}\\n' \"$HERDR_WORKSPACES\";;\n" +
+		"'tab list') echo '{\"result\":{\"tabs\":[]}}';;\n" +
+		"'pane list') echo '{\"result\":{\"panes\":[]}}';;\n" +
+		"'agent list') printf '{\"result\":{\"agents\":[%s]}}\\n' \"$HERDR_AGENTS\";;\n" +
+		"'machine list') printf '[%s]\\n' \"$HERDR_MACHINES\";;\n" +
+		"'agent read') i=1; while [ \"$i\" -le \"$HERDR_PANE_LINES\" ]; do printf '%s line %s\\n' \"$3\" \"$i\"; i=$((i+1)); done;;\n" +
+		"'status server') if [ -z \"$HERDR_RUNNING\" ] || [ -e \"$HERDR_RUNNING\" ]; then echo '{\"running\":true}'; else echo '{\"running\":false}'; fi;;\n" +
+		"'server ') touch \"$HERDR_RUNNING\";;\n" +
+		"esac\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1003,8 +1016,33 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 	t.Setenv("HERDR_BIN_PATH", bin)
 	t.Setenv("HERDR_LOG", log)
 	t.Setenv("HERDR_WORKSPACES", workspaces)
+	t.Setenv("HERDR_RUNNING", "")
 	t.Setenv("TMUX", "")
 	return log
+}
+
+// installFakeHerdrOutside runs devtools in a plain terminal with herdr
+// installed, its server running once the returned marker file exists.
+func installFakeHerdrOutside(t *testing.T, workspaces string) (string, string) {
+	t.Helper()
+	log := installFakeHerdr(t, workspaces)
+	marker := filepath.Join(t.TempDir(), "running")
+	t.Setenv("HERDR_ENV", "")
+	t.Setenv("HERDR_RUNNING", marker)
+	return log, marker
+}
+
+// herdrCalls reads the fake herdr log, collapsing the repeated server status
+// polls whose count depends on timing.
+func herdrCalls(t *testing.T, log string) string {
+	t.Helper()
+	var lines []string
+	for _, line := range strings.Split(readLog(t, log), "\n") {
+		if len(lines) == 0 || lines[len(lines)-1] != line {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func readLog(t *testing.T, path string) string {

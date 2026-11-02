@@ -1,8 +1,10 @@
 # devtools
 
-`devtools` is a small Go CLI for managing development checkouts as Git worktrees and pairing each worktree with a tmux session.
+`devtools` is a small Go CLI for managing development checkouts as Git worktrees and pairing each worktree with a session in a terminal multiplexer.
 
-Inside [herdr](https://herdr.dev) (and not in a tmux nested in it), each session is a herdr workspace instead: it's labeled with the session name, switching focuses it or creates it in the worktree, removing a worktree closes it, and `sessions` picks between the open workspaces.
+Sessions live in [herdr](https://herdr.dev) by default: each session is a herdr workspace labeled with the session name. Switching focuses it or creates it in the worktree, removing a worktree closes it, and `sessions` picks between the open workspaces. Inside a herdr pane this goes through the running herdr. From a plain terminal, devtools starts a herdr server in the background if none is running, focuses the workspace, and attaches the terminal to herdr, the way `tmux new-session -A` does.
+
+Inside tmux (`$TMUX` is set, including a tmux nested in herdr), sessions are tmux sessions instead. If herdr is not installed (neither `$HERDR_BIN_PATH` nor `herdr` on `PATH`), devtools falls back to tmux. To pick a multiplexer explicitly, set `DEVTOOLS_MULTIPLEXER=tmux` or `DEVTOOLS_MULTIPLEXER=herdr`, or add a `multiplexer` line to the [config file](#configuration). The environment variable wins over the config file, and both win over the `$TMUX` rule.
 
 By default it uses `~/dev` as the workspace root. Multiple roots can be configured; projects are discovered across all of them. Roots come from, in order of precedence:
 
@@ -17,8 +19,8 @@ The first root is the primary root: `new` and `clone` create projects there. All
 
 - Go 1.26 or newer
 - Git
-- tmux, or herdr
-- fzf, for interactive picking with `devtools pick`, `devtools sessions`, or ambiguous `devtools switch` queries
+- herdr or tmux: herdr is the default, tmux is used inside tmux or when herdr is not installed
+- fzf, for interactive picking with `devtools pick`, `devtools sessions`, `devtools agents`, `devtools machines`, or ambiguous `devtools switch` queries
 - Nix, optional, for the provided dev shell and package build
 
 ## Install
@@ -57,7 +59,9 @@ devtools list
 devtools status [--all]
 devtools switch [path-or-query]
 devtools pick
-devtools sessions
+devtools sessions [--machine <label-or-id>]
+devtools agents [--machine <label-or-id>]
+devtools machines
 devtools bookmark add <name> [path]
 devtools bookmark remove <name>
 devtools bookmark list
@@ -90,7 +94,7 @@ Feature branches are converted to filesystem-safe worktree names, so `feature/ex
 
 ### `new`
 
-Creates a normal Git repository on the `main` branch and switches to its tmux session.
+Creates a normal Git repository on the `main` branch and switches to its session.
 
 ```sh
 devtools new scratch
@@ -98,7 +102,7 @@ devtools new scratch
 
 ### `clone`
 
-Clones a repository into the bare-worktree layout, creates the remote default branch worktree, and switches to its tmux session.
+Clones a repository into the bare-worktree layout, creates the remote default branch worktree, and switches to its session.
 
 ```sh
 devtools clone git@github.com:owner/repo.git
@@ -116,7 +120,7 @@ devtools migrate ~/src/repo --allow-dirty
 
 ### `work`
 
-Creates a new worktree for a branch in the current managed project and switches to its tmux session.
+Creates a new worktree for a branch in the current managed project and switches to its session.
 
 ```sh
 devtools work feature/api
@@ -127,7 +131,7 @@ When `--from` is omitted, the current checkout's `HEAD` is used as the start poi
 
 ### `merge`
 
-Merges the current worktree branch into the `main` worktree, fast-forwarding when Git can, then removes the merged worktree and deletes its local branch. Both worktrees must be clean. Pass `--squash` to squash the branch changes into one new commit on `main`; Git opens your editor for the commit message.
+Merges the current worktree branch into the `main` worktree, fast-forwarding when Git can, then removes the merged worktree, closes its session, and deletes its local branch. Both worktrees must be clean. Pass `--squash` to squash the branch changes into one new commit on `main`; Git opens your editor for the commit message.
 
 ```sh
 devtools merge
@@ -162,7 +166,7 @@ devtools rebase --onto origin/main
 
 ### `done`
 
-Removes a worktree and, by default, deletes its local branch. The worktree must be clean and pushed unless `--force` is used.
+Removes a worktree, closes its session, and, by default, deletes its local branch. The worktree must be clean and pushed unless `--force` is used.
 
 ```sh
 devtools done
@@ -193,7 +197,7 @@ devtools status --all
 
 ### `switch`
 
-Switches to a tmux session for a worktree. The target can be an absolute path or a query matched against discovered labels.
+Switches to the session for a worktree, creating it if needed. The target can be an absolute path or a query matched against discovered labels.
 
 ```sh
 devtools switch repo/main
@@ -212,15 +216,35 @@ devtools pick
 
 ### `sessions`
 
-Opens an interactive picker for active tmux sessions and switches to the selected session.
+Opens an interactive picker for the open herdr workspaces, or the active tmux sessions with the tmux multiplexer, and switches to the selected one. The preview shows the recent output of each tab or window.
+
+With `--machine`, it picks a workspace on a saved herdr SSH machine (see `herdr machine list`) instead. `--machine` requires the herdr multiplexer.
 
 ```sh
 devtools sessions
+devtools sessions --machine workbox
+```
+
+### `agents`
+
+Opens an interactive picker for the coding agents herdr recognizes, showing each one's workspace, kind, status, and terminal title. Agents that need attention come first: blocked, done, idle, working, then unknown. The preview shows the agent's screen. Selecting an agent focuses it; from a plain terminal, devtools then attaches to herdr. With `--machine`, it lists the agents on a saved herdr SSH machine.
+
+```sh
+devtools agents
+devtools agents --machine workbox
+```
+
+### `machines`
+
+Opens an interactive picker for the saved herdr SSH machines, previewing each one's workspaces, then the workspace picker for the selected machine. From a plain terminal, devtools attaches to the machine's herdr over SSH (`herdr --remote`). Inside herdr, it focuses the workspace on the machine, but herdr can't switch the machine the window shows from the CLI, so select the machine in the herdr sidebar to see it.
+
+```sh
+devtools machines
 ```
 
 ### `bookmark`
 
-Manages named bookmarks for directories that do not follow the managed bare-worktree layout, like a dotfiles checkout or a notes directory. Bookmarks show up in `list`, `switch`, and `pick` alongside discovered worktrees, and their tmux session is named after the bookmark.
+Manages named bookmarks for directories that do not follow the managed bare-worktree layout, like a dotfiles checkout or a notes directory. Bookmarks show up in `list`, `switch`, and `pick` alongside discovered worktrees, and their session is named after the bookmark.
 
 `add` stores the given path, or the current directory when the path is omitted. Bookmarks are stored in the config file.
 
@@ -244,9 +268,12 @@ root ~/work
 # name followed by path; paths may contain spaces
 bookmark dotfiles ~/.dotfiles
 bookmark notes ~/Documents/notes
+
+# always use tmux, or herdr, regardless of $TMUX
+multiplexer tmux
 ```
 
-`root` lines are used only when neither `--root` nor `DEVTOOLS_ROOT` is set. `bookmark` lines are managed by `devtools bookmark add` and `devtools bookmark remove`, but can also be edited by hand.
+`root` lines are used only when neither `--root` nor `DEVTOOLS_ROOT` is set. `bookmark` lines are managed by `devtools bookmark add` and `devtools bookmark remove`, but can also be edited by hand. `multiplexer` is overridden by `DEVTOOLS_MULTIPLEXER`.
 
 ## Development
 
