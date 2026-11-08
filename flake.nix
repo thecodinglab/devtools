@@ -37,7 +37,7 @@
             version = "0.1.0";
 
             src = self;
-            vendorHash = "sha256-7K17JaXFsjf163g5PXCb5ng2gYdotnZ2IDKk8KFjNj0=";
+            vendorHash = "sha256-ZY3kcXk52/DrI/toEluAS/Z/2O7MRbe98Fo9lgPQmIU=";
 
             subPackages = [ "cmd/devtools" ];
 
@@ -73,7 +73,7 @@
             version = "0.1.0";
 
             src = self;
-            vendorHash = "sha256-7K17JaXFsjf163g5PXCb5ng2gYdotnZ2IDKk8KFjNj0=";
+            vendorHash = "sha256-ZY3kcXk52/DrI/toEluAS/Z/2O7MRbe98Fo9lgPQmIU=";
 
             doCheck = true;
             nativeCheckInputs = [

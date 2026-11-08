@@ -20,7 +20,7 @@ The first root is the primary root: `new` and `clone` create projects there. All
 - Go 1.26 or newer
 - Git
 - herdr or tmux: herdr is the default, tmux is used inside tmux or when herdr is not installed
-- fzf, for interactive picking with `devtools pick`, `devtools sessions`, `devtools agents`, `devtools machines`, or ambiguous `devtools switch` queries
+- fzf, for `devtools agents`, `devtools machines` and `devtools sessions --machine`
 - Nix, optional, for the provided dev shell and package build
 
 ## Install
@@ -49,7 +49,7 @@ Commands:
 devtools new <project-name>
 devtools clone <repo-url> [project-name]
 devtools migrate [--allow-dirty] [path]
-devtools work <branch> [--from <start-point>]
+devtools work [branch] [--from <start-point>]
 devtools merge
 devtools update [--all]
 devtools push
@@ -90,6 +90,38 @@ and creates the default branch as a worktree at:
 
 Feature branches are converted to filesystem-safe worktree names, so `feature/example` becomes `feature-example`.
 
+## The switcher
+
+`devtools pick`, `devtools switch` without a target, `devtools sessions` and `devtools work` without a branch open the switcher: one list of every worktree, bookmark and open workspace.
+
+```text
+  › Switch to a worktree, or name a new feature
+
+  curiensis-website     8 changed
+▎ devtools              5 changed
+    popup-redesign      3 changed   ↑2   working     Rework the switcher
+  kakeibo               1 changed   ↑2   open
+  xcloud                8 changed        idle        Slow VM spawn on prod-node-5801
+    feature-refactor                     needs you   Approve rm?
+
+  ⏎ switch   ⌃N new feature   ⌃G merge into main   tab open only
+```
+
+Each project is one row, standing for its main worktree, with its feature worktrees indented below. The marked row is where you are: the directory of the pane under a herdr popup, or the current directory. The columns are uncommitted changes, how far the branch is ahead of and behind its upstream, and the state of its workspace: `open`, or what its agent is doing (`working`, `idle`, `done`, `needs you`) followed by the agent's terminal title. A clean, pushed worktree without a workspace shows nothing.
+
+Typing filters the list the way fzf does. When the text names no existing worktree, it can become a feature: the last row offers `New feature <name> in <project>, from <worktree>`, branching from the worktree you are in, and enter on it creates the worktree and switches to it. Spaces become dashes. Prefix the name with a project, `xcloud/fix-login`, to start it in another project from its main worktree.
+
+Keys:
+
+- `enter` switches to the selected row, or creates the feature on the create row
+- `↑` `↓` or `ctrl+k` `ctrl+j` move
+- `ctrl+n` creates the feature named by the text
+- `ctrl+g` merges the selected feature into main, after asking, like `devtools merge`
+- `tab` shows only open workspaces, or all again
+- `esc` clears the text, then closes
+
+`devtools sessions` opens it on the open workspaces only, and `devtools work` without a branch opens it to name a feature in the current project.
+
 ## Commands
 
 ### `new`
@@ -120,7 +152,7 @@ devtools migrate ~/src/repo --allow-dirty
 
 ### `work`
 
-Creates a new worktree for a branch in the current managed project and switches to its session.
+Creates a new worktree for a branch in the current managed project and switches to its session. Without a branch it opens [the switcher](#the-switcher) to name one.
 
 ```sh
 devtools work feature/api
@@ -131,7 +163,7 @@ When `--from` is omitted, the current checkout's `HEAD` is used as the start poi
 
 ### `merge`
 
-Merges the current worktree branch into the `main` worktree, fast-forwarding when Git can, then removes the merged worktree, closes its session, and deletes its local branch. Both worktrees must be clean. Pass `--squash` to squash the branch changes into one new commit on `main`; Git opens your editor for the commit message.
+Lands the current worktree branch on `main` without a merge commit: it rebases the branch onto `main`, then fast-forwards `main` to it, then removes the merged worktree, closes its session, and deletes its local branch. If the rebase stops on a conflict it is undone, leaving both branches as they were; rebase and resolve the conflicts with `devtools rebase`, then merge again. A branch that contains merge commits is refused, since rebasing would drop what those merges changed; merge it with `--squash`. Both worktrees must be clean. Pass `--squash` to squash the branch changes into one new commit on `main`; Git opens your editor for the commit message.
 
 ```sh
 devtools merge
@@ -178,7 +210,7 @@ Removing `main` or `master` requires `--allow-main`.
 
 ### `list`
 
-Lists discovered worktrees under all workspace roots, plus any bookmarks.
+Lists discovered worktrees under all workspace roots, plus any bookmarks, grouped by project with their paths. Piped into another program it prints one `label<TAB>path` line per worktree instead.
 
 ```sh
 devtools list
@@ -186,7 +218,7 @@ devtools list
 
 ### `status`
 
-Shows a compact dashboard with branch, clean or dirty state, ahead/behind counts, and upstream. Untracked files are ignored when computing the dirty state.
+Shows the worktrees the way the switcher lists them, one row per project with its features below, each with its uncommitted changes, how far it is ahead of (`↑`) and behind (`↓`) its upstream, or `no upstream`. The branch is shown when the worktree's name doesn't already say it. A clean worktree in step with its upstream shows nothing. Untracked files are ignored when counting changes, and `▎` marks the worktree you are in.
 
 When run from inside a managed worktree, only worktrees for that project are shown. From outside a managed project, all workspace roots are shown. Pass `--all` to show all workspace roots from anywhere. Bookmarks are not included.
 
@@ -204,11 +236,11 @@ devtools switch repo/main
 devtools switch feature-api
 ```
 
-If no target is provided, or if a query matches multiple worktrees, `fzf` is used to pick one.
+If no target is provided, or if a query matches multiple worktrees, [the switcher](#the-switcher) opens, with the query typed in.
 
 ### `pick`
 
-Always opens the interactive picker and switches to the selected worktree.
+Opens [the switcher](#the-switcher).
 
 ```sh
 devtools pick
@@ -216,7 +248,7 @@ devtools pick
 
 ### `sessions`
 
-Opens an interactive picker for the open herdr workspaces, or the active tmux sessions with the tmux multiplexer, and switches to the selected one. The preview shows the recent output of each tab or window.
+Opens [the switcher](#the-switcher) on the open herdr workspaces, or the tmux sessions with the tmux multiplexer, including the ones devtools did not create; `tab` shows every worktree again.
 
 With `--machine`, it picks a workspace on a saved herdr SSH machine (see `herdr machine list`) instead. `--machine` requires the herdr multiplexer.
 

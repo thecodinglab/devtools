@@ -213,7 +213,30 @@ func MergeWorktreeToMain(root, project, worktree string, opts MergeOptions) (Mer
 			return MergeResult{}, err
 		}
 	} else {
-		if err := git(mainWorktreePath, "merge", plan.branch); err != nil {
+		// main only ever fast-forwards: the branch is replayed onto main
+		// first, and a rebase that stops on a conflict is undone, leaving
+		// the branch as it was
+		mainBranch, err := currentBranch(mainWorktreePath)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		if mainBranch == "" {
+			return MergeResult{}, fmt.Errorf("%s worktree is on a detached HEAD; check out its branch before merging", mainWorktree)
+		}
+		// a plain rebase drops merge commits, and with them whatever a merge
+		// changed by itself, a conflict resolution say
+		merges, err := gitOutput(plan.result.WorktreePath, "rev-list", "--merges", mainBranch+".."+plan.branch)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		if strings.TrimSpace(merges) != "" {
+			return MergeResult{}, fmt.Errorf("%s contains merge commits, which rebasing would drop; merge it with devtools merge --squash instead", plan.branch)
+		}
+		if err := git(plan.result.WorktreePath, "rebase", mainBranch); err != nil {
+			_ = git(plan.result.WorktreePath, "rebase", "--abort")
+			return MergeResult{}, fmt.Errorf("%s does not rebase cleanly onto %s; run devtools rebase in %s, resolve the conflicts, then merge again", plan.branch, mainBranch, plan.result.WorktreePath)
+		}
+		if err := git(mainWorktreePath, "merge", "--ff-only", plan.branch); err != nil {
 			return MergeResult{}, err
 		}
 	}

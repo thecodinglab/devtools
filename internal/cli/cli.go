@@ -16,9 +16,10 @@ import (
 	"devtools/internal/devgit"
 	"devtools/internal/discovery"
 	"devtools/internal/herdr"
+	"devtools/internal/hub"
 	"devtools/internal/mux"
-	"devtools/internal/picker"
 	"devtools/internal/tmux"
+	"devtools/internal/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -293,10 +294,16 @@ func migrateCommand(a *app, stdout io.Writer) *cobra.Command {
 func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 	var from string
 	cmd := &cobra.Command{
-		Use:   "work <branch>",
-		Short: "Create a new worktree",
-		Args:  usageExactArgs(1, "usage: devtools work <branch> [--from <start-point>]"),
+		Use:   "work [branch]",
+		Short: "Create a new worktree, or name it in the switcher",
+		Args:  usageMaximumArgs(1, "usage: devtools work [branch] [--from <start-point>]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				if from != "" {
+					return errors.New("usage: devtools work <branch> --from <start-point>")
+				}
+				return a.openHub(hub.ModeNew, "")
+			}
 			g, err := a.globals()
 			if err != nil {
 				return err
@@ -347,26 +354,7 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := devgit.MergeWorktreeToMain(root, project, worktree, devgit.MergeOptions{
-				Squash: squash,
-			})
-			if err != nil {
-				return err
-			}
-			restoreHangup := ignoreHangup()
-			defer restoreHangup()
-			closeSession, err := a.closeForRemoval(
-				tmux.SessionName(result.Project, result.Worktree),
-				tmux.SessionName(result.Project, result.MainWorktree),
-				result.MainWorktreePath,
-			)
-			if err != nil {
-				return err
-			}
-			_, err = devgit.RemoveWorktree(root, project, worktree, devgit.RemoveOptions{
-				Force:        true,
-				DeleteBranch: true,
-			})
+			result, closeSession, err := a.mergeWorktree(root, project, worktree, squash)
 			if err != nil {
 				return err
 			}
@@ -376,6 +364,42 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&squash, "squash", false, "squash the worktree branch into a single commit")
 	return cmd
+}
+
+// mergeWorktree lands a feature worktree on main, rebased so main only
+// fast-forwards, then removes the worktree and its branch, moving over to
+// main's session first if you are in the feature's. The returned function
+// closes the feature's session, which may end devtools when it runs in
+// there, so call it last.
+func (a *app) mergeWorktree(root, project, worktree string, squash bool) (devgit.MergeResult, func() error, error) {
+	result, err := devgit.MergeWorktreeToMain(root, project, worktree, devgit.MergeOptions{
+		Squash: squash,
+	})
+	if err != nil {
+		return devgit.MergeResult{}, nil, err
+	}
+	restoreHangup := ignoreHangup()
+	closeSession, err := a.closeForRemoval(
+		tmux.SessionName(result.Project, result.Worktree),
+		tmux.SessionName(result.Project, result.MainWorktree),
+		result.MainWorktreePath,
+	)
+	if err != nil {
+		restoreHangup()
+		return devgit.MergeResult{}, nil, err
+	}
+	_, err = devgit.RemoveWorktree(root, project, worktree, devgit.RemoveOptions{
+		Force:        true,
+		DeleteBranch: true,
+	})
+	if err != nil {
+		restoreHangup()
+		return devgit.MergeResult{}, nil, err
+	}
+	return result, func() error {
+		defer restoreHangup()
+		return closeSession()
+	}, nil
 }
 
 func updateCommand(a *app, stdout io.Writer) *cobra.Command {
@@ -615,10 +639,20 @@ func listCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			targets = withBookmarks(targets, g.bookmarks)
-			for _, target := range targets {
-				fmt.Fprintf(stdout, "%s\t%s\n", target.Label, target.Path)
+			if !isTerminal(stdout) {
+				for _, target := range targets {
+					fmt.Fprintf(stdout, "%s\t%s\n", target.Label, target.Path)
+				}
+				return nil
 			}
-			return nil
+			home, _ := os.UserHomeDir()
+			return printTree(stdout, treeRows(targets), "", func(row treeRow) []cell {
+				path := row.target.Path
+				if home != "" && strings.HasPrefix(path, home+string(filepath.Separator)) {
+					path = "~" + strings.TrimPrefix(path, home)
+				}
+				return []cell{{path, ui.CommentText}}
+			})
 		},
 	}
 }
@@ -643,16 +677,21 @@ func statusCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			targets = statusTargets(targets, cwd, all)
-			rows := make([]statusRow, 0, len(targets))
+			states := make(map[string]devgit.WorktreeStatus, len(targets))
 			for _, target := range targets {
 				status, err := devgit.Status(target.Path)
 				if err != nil {
 					return fmt.Errorf("%s: %w", target.Label, err)
 				}
-				rows = append(rows, newStatusRow(target, status))
+				states[target.Path] = status
 			}
-			printStatusRows(stdout, rows)
-			return nil
+			here := ""
+			if current, ok := currentTarget(targets, cwd); ok {
+				here = current.Path
+			}
+			return printTree(stdout, treeRows(targets), here, func(row treeRow) []cell {
+				return statusCells(row.target, states[row.target.Path])
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "show all worktrees under the workspace root")
@@ -700,52 +739,31 @@ func currentTarget(targets []discovery.Target, cwd string) (discovery.Target, bo
 	return discovery.Target{}, false
 }
 
-type statusRow struct {
-	Worktree string
-	Branch   string
-	State    string
-	Ahead    string
-	Behind   string
-	Upstream string
-}
-
-func newStatusRow(target discovery.Target, status devgit.WorktreeStatus) statusRow {
-	state := "clean"
-	if status.Dirty {
-		state = fmt.Sprintf("dirty(%d)", status.Changes)
+// statusCells are the columns of a status row: the branch when the
+// worktree's name doesn't say it, uncommitted changes, how far the branch is
+// from its upstream, or that it has none.
+func statusCells(target discovery.Target, status devgit.WorktreeStatus) []cell {
+	git := ui.Git{
+		Changes:     status.Changes,
+		Ahead:       status.Ahead,
+		Behind:      status.Behind,
+		HasUpstream: status.HasUpstream,
+		Detached:    status.Detached,
+		Branch:      status.Branch,
 	}
-	ahead := "-"
-	behind := "-"
-	upstream := "-"
-	if status.HasUpstream {
-		ahead = fmt.Sprint(status.Ahead)
-		behind = fmt.Sprint(status.Behind)
-		upstream = status.Upstream
+	branch := ""
+	if devgit.WorktreeName(status.Branch) != target.Worktree {
+		branch = status.Branch
 	}
-	return statusRow{
-		Worktree: target.Label,
-		Branch:   status.Branch,
-		State:    state,
-		Ahead:    ahead,
-		Behind:   behind,
-		Upstream: upstream,
+	upstream := ""
+	if !status.HasUpstream && !status.Detached {
+		upstream = "no upstream"
 	}
-}
-
-func printStatusRows(stdout io.Writer, rows []statusRow) {
-	widths := []int{len("WORKTREE"), len("BRANCH"), len("STATE"), len("AHEAD"), len("BEHIND"), len("UPSTREAM")}
-	for _, row := range rows {
-		widths[0] = max(widths[0], len(row.Worktree))
-		widths[1] = max(widths[1], len(row.Branch))
-		widths[2] = max(widths[2], len(row.State))
-		widths[3] = max(widths[3], len(row.Ahead))
-		widths[4] = max(widths[4], len(row.Behind))
-		widths[5] = max(widths[5], len(row.Upstream))
-	}
-	format := fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds  %%%ds  %%%ds  %%-%ds\n", widths[0], widths[1], widths[2], widths[3], widths[4], widths[5])
-	fmt.Fprintf(stdout, format, "WORKTREE", "BRANCH", "STATE", "AHEAD", "BEHIND", "UPSTREAM")
-	for _, row := range rows {
-		fmt.Fprintf(stdout, format, row.Worktree, row.Branch, row.State, row.Ahead, row.Behind, row.Upstream)
+	return []cell{
+		{branch, ui.CommentText},
+		{ui.Changes(git), ui.MutedText},
+		{ui.Sync(git), ui.MutedText},
+		{upstream, ui.CommentText},
 	}
 }
 
@@ -763,24 +781,18 @@ func switchCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targets = withBookmarks(targets, g.bookmarks)
-			var target discovery.Target
 			if len(args) == 0 {
-				target, err = picker.Select(targets)
-			} else {
-				var matches []discovery.Target
-				matches, err = discovery.ResolveMatches(targets, args[0])
-				if err == nil {
-					if len(matches) == 1 {
-						target = matches[0]
-					} else {
-						target, err = picker.Select(matches)
-					}
-				}
+				return a.openHub(hub.ModeAll, "")
 			}
+			targets = withBookmarks(targets, g.bookmarks)
+			matches, err := discovery.ResolveMatches(targets, args[0])
 			if err != nil {
 				return err
 			}
+			if len(matches) > 1 {
+				return a.openHubWith(g, targets, args[0])
+			}
+			target := matches[0]
 			return a.switchSession(target.Path, tmux.SessionName(target.Project, target.Worktree))
 		},
 	}
@@ -789,23 +801,10 @@ func switchCommand(a *app) *cobra.Command {
 func pickCommand(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pick",
-		Short: "Pick a worktree session",
+		Short: "Open the switcher",
 		Args:  usageNoArgs("usage: devtools pick"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			g, err := a.globals()
-			if err != nil {
-				return err
-			}
-			targets, err := scanTargets(g)
-			if err != nil {
-				return err
-			}
-			targets = withBookmarks(targets, g.bookmarks)
-			target, err := picker.Select(targets)
-			if err != nil {
-				return err
-			}
-			return a.switchSession(target.Path, tmux.SessionName(target.Project, target.Worktree))
+			return a.openHub(hub.ModeAll, "")
 		},
 	}
 }
@@ -1022,43 +1021,20 @@ func sessionsCommand(a *app, stdout io.Writer) *cobra.Command {
 	var machine string
 	cmd := &cobra.Command{
 		Use:   "sessions",
-		Short: "Pick an active tmux session or herdr workspace",
+		Short: "Open the switcher on the open workspaces",
 		Args:  usageNoArgs("usage: devtools sessions [--machine <label-or-id>]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if machine == "" {
+				return a.openHub(hub.ModeOpen, "")
+			}
 			backend, err := a.multiplexer()
 			if err != nil {
 				return err
 			}
-			if backend == mux.Herdr || machine != "" {
-				if backend != mux.Herdr {
-					return errors.New("--machine needs the herdr multiplexer")
-				}
-				return pickWorkspace(stdout, machine)
+			if backend != mux.Herdr {
+				return errors.New("--machine needs the herdr multiplexer")
 			}
-			sessions, err := tmux.ListSessions()
-			if err != nil {
-				return err
-			}
-			options := make([]picker.Option, 0, len(sessions))
-			for _, session := range sessions {
-				label := fmt.Sprintf("%s\t%d windows", session.Name, session.Windows)
-				if session.Attached {
-					label += "\tattached"
-				}
-				options = append(options, picker.Option{
-					Label: label,
-					Value: session.Name,
-				})
-			}
-			preview, err := selfCommand("session-preview", "{1}")
-			if err != nil {
-				return err
-			}
-			option, err := picker.SelectOption(options, "no tmux sessions found", preview)
-			if err != nil {
-				return err
-			}
-			return tmux.SwitchSession(option.Value)
+			return pickWorkspace(stdout, machine)
 		},
 	}
 	cmd.Flags().StringVar(&machine, "machine", "", "pick a workspace on a saved herdr machine")

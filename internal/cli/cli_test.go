@@ -2,13 +2,14 @@ package cli
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"devtools/internal/hub"
 )
 
 func TestMain(m *testing.M) {
@@ -349,20 +350,20 @@ func TestStatusShowsCompactDashboardForDiscoveredWorktrees(t *testing.T) {
 	}
 	got := strings.TrimSpace(stdout.String())
 	lines := strings.Split(got, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("stdout = %q, want header plus two current-project rows", got)
+	if len(lines) != 2 {
+		t.Fatalf("stdout = %q, want the project row and its feature", got)
 	}
-	if strings.Contains(got, "gadgets/main") {
+	if strings.Contains(got, "gadgets") {
 		t.Fatalf("default status should only show current project, got %q", got)
 	}
-	if !strings.Contains(lines[0], "WORKTREE") || !strings.Contains(lines[0], "UPSTREAM") {
-		t.Fatalf("header = %q", lines[0])
+	// the project row stands for main, marked as where you are; clean and
+	// in step with origin, it says nothing more
+	if strings.TrimSpace(lines[0]) != "▎ widgets" {
+		t.Fatalf("main row = %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "widgets/feature-test") || !strings.Contains(lines[1], "feature/test") || !strings.Contains(lines[1], "dirty(1)") || !strings.Contains(lines[1], "-") {
+	// README.md changed, scratch.txt is untracked and doesn't count
+	if !strings.HasPrefix(lines[1], "    feature-test") || !strings.Contains(lines[1], "1 changed") || !strings.Contains(lines[1], "no upstream") {
 		t.Fatalf("feature row = %q", lines[1])
-	}
-	if !strings.Contains(lines[2], "widgets/main") || !strings.Contains(lines[2], "main") || !strings.Contains(lines[2], "clean") || !strings.Contains(lines[2], "origin/main") {
-		t.Fatalf("main row = %q", lines[2])
 	}
 
 	stdout.Reset()
@@ -371,7 +372,7 @@ func TestStatusShowsCompactDashboardForDiscoveredWorktrees(t *testing.T) {
 		t.Fatalf("status --all returned %d, stderr=%s", code, stderr.String())
 	}
 	got = strings.TrimSpace(stdout.String())
-	if !strings.Contains(got, "gadgets/main") || !strings.Contains(got, "widgets/feature-test") || !strings.Contains(got, "widgets/main") {
+	if !strings.Contains(got, "gadgets") || !strings.Contains(got, "feature-test") || !strings.Contains(got, "widgets") {
 		t.Fatalf("status --all output = %q, want all worktrees", got)
 	}
 
@@ -382,7 +383,7 @@ func TestStatusShowsCompactDashboardForDiscoveredWorktrees(t *testing.T) {
 		t.Fatalf("status outside project returned %d, stderr=%s", code, stderr.String())
 	}
 	got = strings.TrimSpace(stdout.String())
-	if !strings.Contains(got, "gadgets/main") || !strings.Contains(got, "widgets/feature-test") || !strings.Contains(got, "widgets/main") {
+	if got != "gadgets\n  widgets\n    feature-test   1 changed   no upstream" {
 		t.Fatalf("status outside project output = %q, want all worktrees", got)
 	}
 }
@@ -500,34 +501,40 @@ func TestCloneStartsTmuxSessionForMainWorktree(t *testing.T) {
 	}
 }
 
-func TestSwitchAmbiguousQueryUsesPickerWithMatches(t *testing.T) {
+func TestSwitchAmbiguousQueryOpensSwitcherWithTheQuery(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "widgets")
-	mainPath := filepath.Join(project, "main")
 	featurePath := filepath.Join(project, "feature-cli")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	gitCmd(t, project, "init", "--bare", ".bare")
-	makeRepo(t, mainPath)
+	makeRepo(t, filepath.Join(project, "main"))
 	makeRepo(t, featurePath)
 
 	tmuxLog := installFakeTmux(t)
-	fzfLog := installFakeFZF(t, "widgets/feature-cli\t"+featurePath)
 	t.Setenv("DEVTOOLS_ROOT", root)
+	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
+		if opts.Mode != hub.ModeAll || opts.Query != "widgets" {
+			t.Fatalf("mode=%v query=%q, want all and the query", opts.Mode, opts.Query)
+		}
+		items, err := opts.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var labels []string
+		for _, item := range items {
+			labels = append(labels, item.Label)
+		}
+		if strings.Join(labels, ",") != "widgets/feature-cli,widgets/main" {
+			t.Fatalf("items = %v", labels)
+		}
+		return &items[0], nil
+	})
 	var stdout, stderr bytes.Buffer
 
 	if code := Run([]string{"switch", "widgets"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
-	}
-	fzfInput, err := os.ReadFile(fzfLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotInput := strings.TrimSpace(string(fzfInput))
-	wantInput := "widgets/feature-cli\t" + featurePath + "\nwidgets/main\t" + mainPath
-	if gotInput != wantInput {
-		t.Fatalf("fzf input = %q, want %q", gotInput, wantInput)
 	}
 	tmuxOut, err := os.ReadFile(tmuxLog)
 	if err != nil {
@@ -540,36 +547,27 @@ func TestSwitchAmbiguousQueryUsesPickerWithMatches(t *testing.T) {
 	}
 }
 
-func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
+func TestSessionsOpensSwitcherOnOpenTmuxSessions(t *testing.T) {
 	log := installFakeTmuxWithSessions(t, "work\t1\t0\nops\t2\t1")
-	fzfLog := installFakeFZF(t, "ops\t2 windows\tattached")
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
+	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
+		if opts.Mode != hub.ModeOpen || !opts.SwitchInPlace {
+			t.Fatalf("mode=%v in place=%v, want open sessions switched in place", opts.Mode, opts.SwitchInPlace)
+		}
+		sessions, others, err := opts.Backend.Sessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !sessions["ops"].Open || !sessions["ops"].Focused || !sessions["work"].Open || len(others) != 2 {
+			t.Fatalf("sessions = %+v, others = %+v", sessions, others)
+		}
+		return nil, opts.Backend.Switch(others[1])
+	})
 	var stdout, stderr bytes.Buffer
 
 	if code := Run([]string{"sessions"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("sessions returned %d, stderr=%s", code, stderr.String())
-	}
-	fzfInput, err := os.ReadFile(fzfLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotInput := strings.TrimSpace(string(fzfInput))
-	wantInput := "work\t1 windows\nops\t2 windows\tattached"
-	if gotInput != wantInput {
-		t.Fatalf("fzf input = %q, want %q", gotInput, wantInput)
-	}
-	fzfArgs, err := os.ReadFile(fzfLog + ".args")
-	if err != nil {
-		t.Fatal(err)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotArgs := strings.TrimSpace(string(fzfArgs))
-	wantArgs := fmt.Sprintf("--with-nth=1 --delimiter=\t --preview %q session-preview {1}", exe)
-	if gotArgs != wantArgs {
-		t.Fatalf("fzf args = %q, want %q", gotArgs, wantArgs)
 	}
 	got := tmuxCommands(t, log)
 	want := []string{
@@ -578,6 +576,165 @@ func TestSessionsCommandUsesPickerWithActiveTmuxSessions(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("tmux commands = %#v, want %#v", got, want)
+	}
+}
+
+func TestWorkWithoutBranchOpensSwitcherToNameAFeature(t *testing.T) {
+	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
+	installFakeTmux(t)
+	called := false
+	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
+		called = true
+		if opts.Mode != hub.ModeNew {
+			t.Fatalf("mode = %v, want new", opts.Mode)
+		}
+		return nil, nil
+	})
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"work"}, &stdout, &stderr); code != 0 || !called {
+		t.Fatalf("work returned %d called=%v, stderr=%s", code, called, stderr.String())
+	}
+}
+
+func TestSwitcherCreatesFeatureFromTheWorktreeYouAreIn(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	t.Setenv("HERDR_ACTIVE_PANE_CWD", mainPath)
+	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
+		if opts.Here != mainPath {
+			t.Fatalf("here = %q, want the pane's directory %q", opts.Here, mainPath)
+		}
+		item, err := opts.Backend.Create(hub.CreateRequest{
+			Root: root, Project: "widgets", Branch: "feature/api", From: "main", FromPath: mainPath,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &item, nil
+	})
+	if code := Run([]string{"pick"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("pick returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-api")
+	if branch := strings.TrimSpace(gitOut(t, featurePath, "branch", "--show-current")); branch != "feature/api" {
+		t.Fatalf("branch = %q, want feature/api", branch)
+	}
+}
+
+func TestMergeRebasesSoMainOnlyFastForwards(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	identity(t)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	commitFile(t, featurePath, "feature.txt", "feature\n", "feature")
+	// main moves on after the branch started
+	commitFile(t, mainPath, "main.txt", "main\n", "main moved")
+
+	changeCwd(t, featurePath)
+	if code := Run([]string{"merge"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("merge returned %d, stderr=%s", code, stderr.String())
+	}
+	if merges := strings.TrimSpace(gitOut(t, mainPath, "rev-list", "--merges", "HEAD")); merges != "" {
+		t.Fatalf("main has merge commits %q, want a linear history", merges)
+	}
+	subjects := strings.Fields(gitOut(t, mainPath, "log", "--format=%s", "-3"))
+	if strings.Join(subjects, " ") != "feature main moved init" {
+		t.Fatalf("main log = %v, want the feature replayed on top of main", subjects)
+	}
+}
+
+func TestMergeRefusesBranchWithMergeCommits(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	identity(t)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	gitCmd(t, featurePath, "checkout", "-q", "-b", "side")
+	commitFile(t, featurePath, "side.txt", "side\n", "side")
+	gitCmd(t, featurePath, "checkout", "-q", "feature/test")
+	commitFile(t, featurePath, "feature.txt", "feature\n", "feature")
+	gitCmd(t, featurePath, "merge", "--no-ff", "--no-commit", "side")
+	commitFile(t, featurePath, "merge-only.txt", "only in the merge\n", "merge side")
+	before := strings.TrimSpace(gitOut(t, featurePath, "rev-parse", "HEAD"))
+
+	changeCwd(t, featurePath)
+	stderr.Reset()
+	if code := Run([]string{"merge"}, &stdout, &stderr); code == 0 {
+		t.Fatal("merge succeeded and would have dropped the merge commit")
+	}
+	if !strings.Contains(stderr.String(), "--squash") {
+		t.Fatalf("stderr = %q, want a pointer to --squash", stderr.String())
+	}
+	if after := strings.TrimSpace(gitOut(t, featurePath, "rev-parse", "HEAD")); after != before {
+		t.Fatalf("feature moved from %s to %s", before, after)
+	}
+}
+
+func TestMergeThatConflictsLeavesEverythingAsItWas(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t)
+	installFakeTmux(t)
+	t.Setenv("DEVTOOLS_ROOT", root)
+	identity(t)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
+	}
+	mainPath := filepath.Join(root, "widgets", "main")
+	changeCwd(t, mainPath)
+	if code := Run([]string{"work", "feature/test"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	featurePath := filepath.Join(root, "widgets", "feature-test")
+	commitFile(t, featurePath, "README.md", "feature\n", "feature edit")
+	commitFile(t, mainPath, "README.md", "main\n", "main edit")
+	before := strings.TrimSpace(gitOut(t, featurePath, "rev-parse", "HEAD"))
+	mainBefore := strings.TrimSpace(gitOut(t, mainPath, "rev-parse", "HEAD"))
+
+	changeCwd(t, featurePath)
+	stderr.Reset()
+	if code := Run([]string{"merge"}, &stdout, &stderr); code == 0 {
+		t.Fatal("merge succeeded despite the conflict")
+	}
+	if !strings.Contains(stderr.String(), "does not rebase cleanly onto main") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if after := strings.TrimSpace(gitOut(t, featurePath, "rev-parse", "HEAD")); after != before {
+		t.Fatalf("feature moved from %s to %s", before, after)
+	}
+	if after := strings.TrimSpace(gitOut(t, mainPath, "rev-parse", "HEAD")); after != mainBefore {
+		t.Fatalf("main moved from %s to %s", mainBefore, after)
+	}
+	if status := strings.TrimSpace(gitOut(t, featurePath, "status", "--porcelain")); status != "" {
+		t.Fatalf("feature worktree left dirty: %q", status)
 	}
 }
 
@@ -968,6 +1125,35 @@ func TestGitWorkflowCommandsOperateThroughCLI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(mainPath, "remote.txt")); err != nil {
 		t.Fatalf("expected updated main worktree: %v", err)
 	}
+}
+
+// stubHub replaces the switcher, which needs a terminal, with fn.
+func stubHub(t *testing.T, fn func(hub.Options) (*hub.Item, error)) {
+	t.Helper()
+	saved := runHub
+	runHub = fn
+	t.Cleanup(func() { runHub = saved })
+}
+
+// identity lets git commit and rebase in tests.
+func identity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
+	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+}
+
+func commitFile(t *testing.T, dir, name, content, message string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, dir, "add", name)
+	gitCmd(t, dir, "commit", "-m", message)
 }
 
 func installFakeTmux(t *testing.T) string {

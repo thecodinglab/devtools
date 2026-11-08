@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"devtools/internal/hub"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -383,15 +384,41 @@ func installFakeFZFSequence(t *testing.T, selections ...string) string {
 
 func TestSessionsOutsideHerdrStartsServerBeforeListing(t *testing.T) {
 	log, _ := installFakeHerdrOutside(t, testWorkspaces)
-	installFakeFZF(t, "ops\t1 tabs\tw2")
+	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
+	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
+		if opts.SwitchInPlace {
+			t.Fatal("outside herdr the switcher can't switch in place, attaching takes the terminal")
+		}
+		_, others, err := opts.Backend.Sessions()
+		if err != nil || len(others) != 2 {
+			t.Fatalf("others = %+v, err = %v", others, err)
+		}
+		return &others[1], nil
+	})
 
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{"sessions"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("sessions returned %d, stderr=%s", code, stderr.String())
 	}
-	want := "status server --json\nserver\nstatus server --json\nworkspace list\nstatus server --json\nworkspace focus w2\n<attach>"
+	want := "status server --json\nserver\nstatus server --json\nworkspace list\nagent list\nstatus server --json\nworkspace focus w2\n<attach>"
 	if got := herdrCalls(t, log); got != want {
 		t.Fatalf("herdr args = %q, want %q", got, want)
+	}
+}
+
+func TestSwitcherShowsEachWorkspacesMostUrgentAgent(t *testing.T) {
+	installFakeHerdr(t, testWorkspaces)
+	t.Setenv("HERDR_AGENTS", testAgents)
+	sessions, _, err := hubBackend{backend: "herdr"}.Sessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sessions["ops"]; got.Agent != "blocked" || got.Title != "Approve rm?" {
+		t.Fatalf("ops = %+v, want its blocked agent", got)
+	}
+	// done outranks working
+	if got := sessions["devtools-main"]; got.Agent != "done" || got.Title != "Review" {
+		t.Fatalf("devtools-main = %+v, want the done reviewer", got)
 	}
 }
 

@@ -6,36 +6,11 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-
-	"devtools/internal/discovery"
 )
 
 type Option struct {
 	Label string
 	Value string
-}
-
-func Select(targets []discovery.Target) (discovery.Target, error) {
-	if len(targets) == 0 {
-		return discovery.Target{}, errors.New("no projects found")
-	}
-	var input strings.Builder
-	byLine := make(map[string]discovery.Target, len(targets))
-	for _, target := range targets {
-		line := target.Label + "\t" + target.Path
-		byLine[line] = target
-		input.WriteString(line)
-		input.WriteByte('\n')
-	}
-	line, err := runFZF(input.String())
-	if err != nil {
-		return discovery.Target{}, err
-	}
-	target, ok := byLine[line]
-	if !ok {
-		return discovery.Target{}, fmt.Errorf("unknown fzf selection %q", line)
-	}
-	return target, nil
 }
 
 func SelectOption(options []Option, emptyMessage, preview string) (Option, error) {
