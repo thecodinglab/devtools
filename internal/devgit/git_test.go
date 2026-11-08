@@ -4,8 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProjectNameFromURL(t *testing.T) {
@@ -467,4 +469,100 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s failed in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
 	return string(out)
+}
+
+func TestRemoveWorktreeLeavesABigBuildToTheBackground(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// an ignored build directory, like a cargo target
+	if err := os.WriteFile(filepath.Join(added.WorktreePath, ".gitignore"), []byte("target/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := filepath.Join(added.WorktreePath, "target", "debug")
+	if err := os.MkdirAll(build, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2000 {
+		if err := os.WriteFile(filepath.Join(build, strconv.Itoa(i)+".o"), []byte("object"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := trashWait
+	trashWait = 0
+	t.Cleanup(func() { trashWait = saved })
+
+	start := time.Now()
+	if _, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{Force: true, DeleteBranch: true}); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("removal took %s, want it to leave deleting the files to the background", took)
+	}
+	if _, err := os.Stat(added.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree still there: %v", err)
+	}
+	barePath := filepath.Join(root, "widgets", ".bare")
+	if list := gitOut(t, barePath, "worktree", "list"); strings.Contains(list, "feature-test") {
+		t.Fatalf("git still lists the worktree:\n%s", list)
+	}
+	if _, err := gitOutputBare(barePath, "show-ref", "--verify", "--quiet", "refs/heads/feature/test"); err == nil {
+		t.Fatal("expected local branch to be deleted")
+	}
+	// the background deletion empties the trash
+	trash := filepath.Join(barePath, trashDirName)
+	deadline := time.Now().Add(10 * time.Second)
+	for exists(trash) {
+		if time.Now().After(deadline) {
+			t.Fatal("trash was never emptied")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestRemoveWorktreeRefusesUntrackedFilesWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, added.WorktreePath, "push", "-u", "origin", "feature/test")
+	if err := os.WriteFile(filepath.Join(added.WorktreePath, "notes.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{DeleteBranch: true}); err == nil || !strings.Contains(err.Error(), "untracked") {
+		t.Fatalf("err = %v, want a refusal over the untracked file", err)
+	}
+	if _, err := os.Stat(filepath.Join(added.WorktreePath, "notes.txt")); err != nil {
+		t.Fatalf("untracked file lost: %v", err)
+	}
+}
+
+func TestRemoveWorktreeRefusesALockedWorktree(t *testing.T) {
+	root := t.TempDir()
+	remote := createRemote(t, "main")
+	if _, err := Clone(root, remote, "widgets"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := AddWorktree(root, "widgets", "feature/test", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Join(root, "widgets", ".bare"), "worktree", "lock", added.WorktreePath)
+	if _, err := RemoveWorktree(root, "widgets", "feature/test", RemoveOptions{Force: true, DeleteBranch: true}); err == nil || !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("err = %v, want a refusal for the locked worktree", err)
+	}
+	if _, err := os.Stat(added.WorktreePath); err != nil {
+		t.Fatalf("locked worktree removed: %v", err)
+	}
 }

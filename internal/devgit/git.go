@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const bareDirName = ".bare"
@@ -154,12 +156,34 @@ func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result,
 	barePath := plan.result.BarePath
 	worktreePath := plan.result.WorktreePath
 
-	args := []string{"worktree", "remove"}
-	if opts.Force {
-		args = append(args, "--force")
+	// what git worktree remove refuses without --force
+	if locked, err := worktreeLocked(barePath, worktreePath); err != nil {
+		return Result{}, err
+	} else if locked {
+		return Result{}, fmt.Errorf("%s is locked; unlock it with git worktree unlock first", worktreePath)
 	}
-	args = append(args, worktreePath)
-	if err := gitBare(barePath, args...); err != nil {
+	if !opts.Force {
+		status, err := gitOutput(worktreePath, "status", "--porcelain", "--untracked-files=normal")
+		if err != nil {
+			return Result{}, err
+		}
+		if strings.TrimSpace(status) != "" {
+			return Result{}, errors.New("worktree has untracked files; pass --force to remove anyway")
+		}
+	}
+
+	// A worktree can hold a build's worth of ignored files, hundreds of
+	// thousands of them, and deleting those takes minutes. So it is moved
+	// into the trash, which is instant on the same disk, git forgets it,
+	// and the files are deleted in the background.
+	if err := os.Rename(worktreePath, trashPath(barePath, plan.result.Worktree)); err != nil {
+		// another disk, say: let git delete it in place
+		args := []string{"worktree", "remove", "--force", worktreePath}
+		if err := gitBare(barePath, args...); err != nil {
+			return Result{}, err
+		}
+	}
+	if err := gitBare(barePath, "worktree", "prune"); err != nil {
 		return Result{}, err
 	}
 	if opts.DeleteBranch && plan.branch != "" {
@@ -168,10 +192,74 @@ func RemoveWorktree(root, project, worktree string, opts RemoveOptions) (Result,
 			return Result{}, err
 		}
 	}
-	if err := gitBare(barePath, "worktree", "prune"); err != nil {
-		return Result{}, err
-	}
+	emptyTrash(barePath)
 	return plan.result, nil
+}
+
+// trashDirName holds removed worktrees inside the bare repository, where
+// discovery doesn't look, until they are deleted.
+const trashDirName = "devtools-trash"
+
+// trashPath is a fresh place in the trash for a worktree.
+func trashPath(barePath, worktree string) string {
+	trash := filepath.Join(barePath, trashDirName)
+	_ = os.MkdirAll(trash, 0o755)
+	return filepath.Join(trash, fmt.Sprintf("%s-%d", worktree, time.Now().UnixNano()))
+}
+
+// trashWait is how long removing a worktree waits for its files to be
+// deleted before it leaves the rest to the background.
+var trashWait = 250 * time.Millisecond
+
+// emptyTrash deletes the trash of a bare repository in a process of its
+// own session, which outlives devtools and a closing herdr workspace or
+// tmux session. It waits a moment, which is all a small worktree needs.
+func emptyTrash(barePath string) {
+	trash := filepath.Join(barePath, trashDirName)
+	if !exists(trash) {
+		return
+	}
+	cmd := exec.Command("rm", "-rf", trash)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(trashWait):
+	}
+}
+
+// worktreeLocked reports whether git has the worktree at path locked.
+func worktreeLocked(barePath, path string) (bool, error) {
+	out, err := gitOutputBare(barePath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	want := canonicalPath(path)
+	current := ""
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "worktree "); ok {
+			current = canonicalPath(rest)
+			continue
+		}
+		if current == want && (line == "locked" || strings.HasPrefix(line, "locked ")) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func canonicalPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 func MergeWorktreeToMain(root, project, worktree string, opts MergeOptions) (MergeResult, error) {

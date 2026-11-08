@@ -200,6 +200,8 @@ devtools rebase --onto origin/main
 
 Removes a worktree, closes its session, and, by default, deletes its local branch. The worktree must be clean and pushed unless `--force` is used.
 
+The worktree is moved into a trash folder inside the project's `.bare` and git forgets it at once; its files, a build's worth of them in a compiled project, are deleted in the background, so `done` returns right away however large the worktree is. `merge` removes the merged worktree the same way.
+
 ```sh
 devtools done
 devtools done feature-api --keep-branch
