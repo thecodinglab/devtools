@@ -717,17 +717,19 @@ func (m *model) refilter() {
 	case m.newMode || (query != "" && len(matches) == 0):
 		m.cursor = len(m.selectable())
 	case query != "":
-		// the best match, which a project's main row may have been put
-		// above
-		best := matches[0]
+		// the best match, the topmost row among equals, so a query naming
+		// only the project lands on its main worktree rather than a
+		// feature listed below it
+		scores := make(map[int]int, len(matches))
+		best := matches[0].score
 		for _, s := range matches {
-			if s.score > best.score {
-				best = s
-			}
+			scores[s.item] = s.score
+			best = max(best, s.score)
 		}
 		for i, r := range m.selectable() {
-			if m.rows[r].item == best.item {
+			if score, ok := scores[m.rows[r].item]; ok && score == best {
 				m.cursor = i
+				break
 			}
 		}
 	case query == "" && m.here >= 0:

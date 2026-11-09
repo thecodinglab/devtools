@@ -537,3 +537,14 @@ func TestGitStateShowsPerWorktree(t *testing.T) {
 		t.Fatal("the row did not show its changes")
 	}
 }
+
+func TestProjectQuerySelectsMainOverItsFeatures(t *testing.T) {
+	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
+	for _, query := range []string{"xcloud", "xcl"} {
+		m, _ = press(t, m, esc)
+		m = typeText(t, m, query)
+		if got := selectedLabel(m); got != "xcloud/main" {
+			t.Fatalf("%s: selected = %q, want xcloud/main", query, got)
+		}
+	}
+}
