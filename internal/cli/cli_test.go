@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"devtools/internal/herdr"
 	"devtools/internal/hub"
 	"devtools/internal/peer"
 )
@@ -27,6 +29,10 @@ func TestMain(m *testing.M) {
 		os.Unsetenv(name)
 	}
 	os.Setenv("HERDR_BIN_PATH", filepath.Join(tmp, "no-herdr"))
+	// Nor ask the herdr client of the developer to show anything, and give
+	// up on an acknowledgement quickly: the fake herdr has no client.
+	os.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
+	herdr.ActivationWait = 100 * time.Millisecond
 	// Nor ask the network for other machines: a devtools serve on the LAN
 	// would answer.
 	discoverPeers = func(context.Context, peer.Options) <-chan peer.Result {
@@ -75,7 +81,7 @@ func TestSwitchCreatesHerdrWorkspace(t *testing.T) {
 		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
 	}
 	got := readLog(t, log)
-	want := "workspace list\nworkspace create --cwd " + project + " --label small-main --focus"
+	want := "workspace list\nworkspace create --cwd " + project + " --label small-main --focus\nmachine list --json"
 	if got != want {
 		t.Fatalf("herdr args = %q, want %q", got, want)
 	}
@@ -94,7 +100,7 @@ func TestSwitchFocusesExistingHerdrWorkspace(t *testing.T) {
 		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
 	}
 	got := readLog(t, log)
-	want := "workspace list\nworkspace focus w2"
+	want := "workspace list\nworkspace focus w2\nmachine list --json"
 	if got != want {
 		t.Fatalf("herdr args = %q, want %q", got, want)
 	}
@@ -1194,7 +1200,7 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 		"if [ \"$1 $2\" = \"workspace close\" ] && [ -e \"$HERDR_KILLS_IN\" ]; then\necho 'killed devtools' >&2\nexit 1\nfi\n" +
 		"case \"$1 $2\" in\n" +
 		"'workspace list') printf '{\"result\":{\"workspaces\":[%s]}}\\n' \"$HERDR_WORKSPACES\";;\n" +
-		"'workspace create') echo '{\"result\":{\"root_pane\":{\"pane_id\":\"w9:p1\"}}}';;\n" +
+		"'workspace create') echo '{\"result\":{\"workspace\":{\"workspace_id\":\"w9\"},\"root_pane\":{\"pane_id\":\"w9:p1\"}}}';;\n" +
 		"'tab list') echo '{\"result\":{\"tabs\":[]}}';;\n" +
 		"'pane list') echo '{\"result\":{\"panes\":[]}}';;\n" +
 		"'agent list') printf '{\"result\":{\"agents\":[%s]}}\\n' \"$HERDR_AGENTS\";;\n" +

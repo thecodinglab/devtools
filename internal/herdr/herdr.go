@@ -120,15 +120,25 @@ func (c Client) CapturePane(pane string) (string, error) {
 
 // Switch focuses the workspace for a session, creating it in dir first.
 func (c Client) Switch(dir, session string) error {
+	_, err := c.SwitchWorkspace(dir, session)
+	return err
+}
+
+// SwitchWorkspace is Switch, returning the id of the workspace.
+func (c Client) SwitchWorkspace(dir, session string) (string, error) {
 	workspace, err := c.find(session)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if workspace == "" {
-		_, err := c.output("workspace", "create", "--cwd", dir, "--label", session, "--focus")
-		return err
+	if workspace != "" {
+		return workspace, c.FocusWorkspace(workspace)
 	}
-	return c.FocusWorkspace(workspace)
+	out, err := c.output("workspace", "create", "--cwd", dir, "--label", session, "--focus")
+	if err != nil {
+		return "", err
+	}
+	_, workspace, err = parseCreated(out)
+	return workspace, err
 }
 
 func (c Client) FocusWorkspace(workspace string) error {

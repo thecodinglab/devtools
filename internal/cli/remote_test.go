@@ -3,11 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"devtools/internal/hub"
 	"devtools/internal/peer"
@@ -300,5 +303,105 @@ func TestHostsDropsControlCharactersFromErrors(t *testing.T) {
 	}
 	if strings.ContainsAny(stdout.String(), "\x1b\x07") {
 		t.Fatalf("hosts output carries control characters: %q", stdout.String())
+	}
+}
+
+type activation struct {
+	Nonce     string `json:"nonce"`
+	Machine   string `json:"machine"`
+	Workspace string `json:"workspace"`
+}
+
+// patchedHerdrClient takes every request to show a workspace the way a
+// herdr client with the activation patch does, and returns what it took.
+func patchedHerdrClient(t *testing.T) func() []activation {
+	t.Helper()
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "herdr", "client")
+	var mu sync.Mutex
+	var took []activation
+	done := make(chan struct{})
+	go func() {
+		seen := ""
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "activate-request.json"))
+			var request activation
+			if err != nil || json.Unmarshal(data, &request) != nil || request.Nonce == seen {
+				continue
+			}
+			seen = request.Nonce
+			mu.Lock()
+			took = append(took, request)
+			mu.Unlock()
+			ack, _ := json.Marshal(map[string]string{"nonce": request.Nonce})
+			os.WriteFile(filepath.Join(dir, "activate-ack.json"), ack, 0o600)
+		}
+	}()
+	t.Cleanup(func() { close(done) })
+	return func() []activation {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]activation(nil), took...)
+	}
+}
+
+func TestSwitchInsideHerdrShowsTheSavedMachineInThisWindow(t *testing.T) {
+	log := installFakeHerdr(t, testWorkspaces)
+	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
+	t.Setenv("HERDR_MACHINES", `{"id":"ad61d571470a4ff1010dece8eaf53b5c","label":"mini","target":"macmini","session":"default","enabled":true,"selected":false}`)
+	took := patchedHerdrClient(t)
+	stubDiscover(t, macmini(xcloudMain))
+	var note string
+	remoteFromHub(t, func(opts hub.Options, items []hub.Item) (*hub.Item, error) {
+		var err error
+		note, err = opts.Backend.Switch(items[0])
+		return nil, err
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"pick"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("pick returned %d, stderr=%s", code, stderr.String())
+	}
+	if note != "" {
+		t.Fatalf("note = %q, the window shows the machine itself", note)
+	}
+	got := took()
+	if len(got) != 1 || got[0].Machine != "ad61d571470a4ff1010dece8eaf53b5c" || got[0].Workspace != "w9" {
+		t.Fatalf("requests = %+v, want the workspace created on the machine", got)
+	}
+	if !strings.Contains(herdrCalls(t, log), "--machine ad61d571470a4ff1010dece8eaf53b5c workspace create") {
+		t.Fatalf("herdr args = %s", herdrCalls(t, log))
+	}
+}
+
+func TestLocalSwitchBringsTheWindowBackFromAMachine(t *testing.T) {
+	root := t.TempDir()
+	makeRepo(t, filepath.Join(root, "small"))
+	t.Setenv("DEVTOOLS_ROOT", root)
+	installFakeHerdr(t, `{"label":"small-main","workspace_id":"w2"}`)
+	t.Setenv("HERDR_MACHINES", `{"id":"ad61d571470a4ff1010dece8eaf53b5c","label":"mini","target":"macmini","session":"default","enabled":true,"selected":true}`)
+	took := patchedHerdrClient(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
+	}
+	if got := took(); len(got) != 1 || got[0].Machine != "" || got[0].Workspace != "w2" {
+		t.Fatalf("requests = %+v, want Local's w2", got)
+	}
+
+	// a window that shows Local already is left alone
+	t.Setenv("HERDR_MACHINES", `{"id":"ad61d571470a4ff1010dece8eaf53b5c","label":"mini","target":"macmini","session":"default","enabled":true,"selected":false}`)
+	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
+	}
+	if got := took(); len(got) != 1 {
+		t.Fatalf("requests = %+v, want no second one", got)
 	}
 }

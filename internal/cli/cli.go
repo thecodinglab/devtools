@@ -1064,9 +1064,16 @@ func (a *app) switchSession(dir, session string) error {
 		return err
 	}
 	if backend == mux.Herdr {
-		return herdr.Visit(func() error {
-			return herdr.Client{}.Switch(dir, session)
+		var workspace string
+		err := herdr.Visit(func() error {
+			var err error
+			workspace, err = herdr.Client{}.SwitchWorkspace(dir, session)
+			return err
 		})
+		if err == nil {
+			showLocal(workspace)
+		}
+		return err
 	}
 	return tmux.Switch(dir, session)
 }

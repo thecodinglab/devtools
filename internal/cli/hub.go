@@ -245,9 +245,13 @@ func (b hubBackend) Switch(item hub.Item) (string, error) {
 		return "", b.app.switchSession(item.Path, item.Session)
 	}
 	if b.backend == mux.Herdr {
-		return "", herdr.Visit(func() error {
+		err := herdr.Visit(func() error {
 			return herdr.Client{}.FocusWorkspace(item.WorkspaceID)
 		})
+		if err == nil {
+			showLocal(item.WorkspaceID)
+		}
+		return "", err
 	}
 	return "", tmux.SwitchSession(item.Session)
 }

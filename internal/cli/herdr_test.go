@@ -81,7 +81,7 @@ func TestMultiplexerOverrides(t *testing.T) {
 		if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
 			t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
 		}
-		if got := readLog(t, herdrLog); got != "workspace list\nworkspace focus w2" {
+		if got := readLog(t, herdrLog); got != "workspace list\nworkspace focus w2\nmachine list --json" {
 			t.Fatalf("herdr args = %q", got)
 		}
 		if out, _ := os.ReadFile(tmuxLog); len(out) != 0 {

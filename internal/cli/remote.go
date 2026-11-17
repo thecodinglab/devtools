@@ -506,16 +506,30 @@ func savedMachine(host remoteHost) (herdr.Machine, bool) {
 
 func focusOnMachine(machine herdr.Machine, item hub.Item) (string, error) {
 	client := herdr.Client{Machine: machine.ID}
+	workspace := item.WorkspaceID
 	var err error
-	if item.Kind == hub.KindWorkspace && item.WorkspaceID != "" {
-		err = client.FocusWorkspace(item.WorkspaceID)
+	if item.Kind == hub.KindWorkspace && workspace != "" {
+		err = client.FocusWorkspace(workspace)
 	} else {
-		err = client.Switch(item.Path, item.Session)
+		workspace, err = client.SwitchWorkspace(item.Path, item.Session)
 	}
 	if err != nil || machine.Selected {
 		return "", err
 	}
+	// a patched herdr client switches its window over; without the patch
+	// only the user can
+	if shown, err := herdr.ShowWorkspace(machine.ID, workspace); err == nil && shown {
+		return "", nil
+	}
 	return "Opened " + item.Label + " on " + item.Host + ". Select " + machine.Label + " in the herdr sidebar to see it.", nil
+}
+
+// showLocal brings the herdr window back to Local when it shows another
+// machine, so the local workspace devtools focused is in sight.
+func showLocal(workspace string) {
+	if herdr.Inside() && workspace != "" && herdr.ShowsMachine() {
+		herdr.ShowWorkspace("", workspace)
+	}
 }
 
 // sshLine is the shell command that runs command on the machine in a
