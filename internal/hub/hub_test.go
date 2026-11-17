@@ -18,13 +18,17 @@ type fakeBackend struct {
 	merged   []Item
 	switched []Item
 	mergeErr error
+	note     string
 }
 
 func (f *fakeBackend) Status(path string) (ui.Git, error) { return ui.Git{}, nil }
 func (f *fakeBackend) Sessions() (map[string]ui.Session, []Item, error) {
 	return f.sessions, f.others, nil
 }
-func (f *fakeBackend) Switch(item Item) error { f.switched = append(f.switched, item); return nil }
+func (f *fakeBackend) Switch(item Item) (string, error) {
+	f.switched = append(f.switched, item)
+	return f.note, nil
+}
 func (f *fakeBackend) Create(req CreateRequest) (Item, error) {
 	f.created = append(f.created, req)
 	return Item{Kind: KindWorktree, Project: req.Project, Worktree: req.Branch, Label: req.Project + "/" + req.Branch}, nil
@@ -546,5 +550,167 @@ func TestProjectQuerySelectsMainOverItsFeatures(t *testing.T) {
 		if got := selectedLabel(m); got != "xcloud/main" {
 			t.Fatalf("%s: selected = %q, want xcloud/main", query, got)
 		}
+	}
+}
+
+func remoteWorktree(host, project, name string) Item {
+	item := worktree(project, name)
+	item.Host = host
+	return item
+}
+
+// arrive feeds the items of other machines in the way they come in.
+func arrive(t *testing.T, m model, items ...[]Item) model {
+	t.Helper()
+	for _, batch := range items {
+		next, _ := m.Update(remoteMsg{items: batch})
+		m = next.(model)
+	}
+	return m
+}
+
+func rowNames(m model) []string {
+	var names []string
+	for _, r := range m.rows {
+		switch r.kind {
+		case rowSpace:
+			continue
+		case rowHost:
+			names = append(names, "@"+r.project)
+		case rowHeader:
+			names = append(names, "#"+r.project)
+		default:
+			item := m.items[r.item]
+			name := item.Label
+			if item.Host != "" {
+				name = item.Host + ":" + name
+			}
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func TestOtherMachinesListAfterThisOneEachUnderItsName(t *testing.T) {
+	m, _ := newTestModel(t, Options{Here: "/dev/devtools/popup-redesign"})
+	m = arrive(t, m,
+		[]Item{remoteWorktree("macmini", "xcloud", "main"), remoteWorktree("macmini", "xcloud", "feature-net")},
+		[]Item{remoteWorktree("macbook", "kakeibo", "main")},
+	)
+	want := "devtools/main devtools/popup-redesign systems xcloud/main xcloud/feature-refactoring " +
+		"@macbook macbook:kakeibo/main @macmini macmini:xcloud/main macmini:xcloud/feature-net"
+	if got := strings.Join(rowNames(m), " "); got != want {
+		t.Fatalf("rows =\n  %s\nwant\n  %s", got, want)
+	}
+	if got := selectedLabel(m); got != "devtools/popup-redesign" {
+		t.Fatalf("selected = %q, the cursor moved as machines answered", got)
+	}
+}
+
+func TestOtherMachineBringsItsOwnState(t *testing.T) {
+	m, _ := newTestModel(t, Options{})
+	item := remoteWorktree("macmini", "kakeibo", "main")
+	item.Git = ui.Git{Changes: 7}
+	item.State = ui.Session{Open: true, Agent: "blocked", Title: "Approve rm?"}
+	m = arrive(t, m, []Item{item})
+	view := ansi.Strip(m.View().Content)
+	for _, want := range []string{"macmini", "7 changed", "needs you", "Approve rm?"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view lacks %q:\n%s", want, view)
+		}
+	}
+	m = typeText(t, m, "kakeibo")
+	next, _ := m.Update(tab)
+	if m = next.(model); selectedLabel(m) != "kakeibo/main" {
+		t.Fatalf("an open workspace over there is not open only: %v", rowNames(m))
+	}
+}
+
+func TestTypingAMachineListsWhatIsOnIt(t *testing.T) {
+	m, _ := newTestModel(t, Options{})
+	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main"), remoteWorktree("macmini", "kakeibo", "budget")})
+	m = typeText(t, m, "macmini bud")
+	if got := strings.Join(rowNames(m), " "); got != "@macmini #kakeibo macmini:kakeibo/budget" {
+		t.Fatalf("rows = %s", got)
+	}
+	// the hits on the machine are not drawn on the worktree name
+	for _, r := range m.rows {
+		if r.kind == rowItem && (len(r.nameHits) != 3 || r.nameHits[0] != 0) {
+			t.Fatalf("hits = %v, want the three of bud", r.nameHits)
+		}
+	}
+}
+
+func TestSamePathOverThereIsNotWhereYouAre(t *testing.T) {
+	m, _ := newTestModel(t, Options{Here: "/dev/xcloud/main"})
+	m = arrive(t, m, []Item{remoteWorktree("macmini", "xcloud", "main")})
+	if here := m.items[m.here]; here.Host != "" {
+		t.Fatalf("here = %+v", here)
+	}
+	// a feature typed here starts here, not over there
+	m = typeText(t, m, "fresh")
+	if m.create == nil || m.create.Root != "/dev" || m.create.FromPath != "/dev/xcloud/main" {
+		t.Fatalf("create = %+v", m.create)
+	}
+}
+
+func TestProjectOnlyOverThereStartsNoFeatureHere(t *testing.T) {
+	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
+	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main")})
+	m = typeText(t, m, "kakeibo/budget")
+	if m.create != nil || !strings.Contains(m.noCreate, "on macmini") {
+		t.Fatalf("create = %+v, noCreate = %q", m.create, m.noCreate)
+	}
+}
+
+func TestFeatureOverThereCannotBeMergedFromHere(t *testing.T) {
+	m, backend := newTestModel(t, Options{})
+	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "budget")})
+	m = typeText(t, m, "budget")
+	m, _ = press(t, m, ctrlG)
+	if m.confirm != nil || len(backend.merged) != 0 || !strings.Contains(m.message, "this machine") {
+		t.Fatalf("confirm = %+v, message = %q", m.confirm, m.message)
+	}
+}
+
+func TestSwitchNoteKeepsSwitcherOpen(t *testing.T) {
+	backend := &fakeBackend{note: "Select macmini in the herdr sidebar to see it."}
+	m, _ := newTestModel(t, Options{Backend: backend, SwitchInPlace: true})
+	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main")})
+	m = typeText(t, m, "kakeibo")
+	m, cmd := press(t, m, enter)
+	if !strings.Contains(m.busy, "on macmini") {
+		t.Fatalf("busy = %q", m.busy)
+	}
+	m, quit := run(t, m, cmd)
+	if quit || m.message != backend.note || m.failed {
+		t.Fatalf("quit = %v, message = %q", quit, m.message)
+	}
+	if len(backend.switched) != 1 || backend.switched[0].Host != "macmini" {
+		t.Fatalf("switched = %+v", backend.switched)
+	}
+}
+
+func TestRemoteStreamIsReadUntilClosed(t *testing.T) {
+	remote := make(chan []Item, 2)
+	remote <- []Item{remoteWorktree("macmini", "kakeibo", "main")}
+	close(remote)
+	m, _ := newTestModel(t, Options{Remote: remote})
+	m, _ = run(t, m, m.waitRemote())
+	if got := rowNames(m); got[len(got)-1] != "macmini:kakeibo/main" {
+		t.Fatalf("rows = %v", got)
+	}
+}
+
+func TestCursorStaysOnItsMachineWhenAnEarlierOneAnswers(t *testing.T) {
+	m, _ := newTestModel(t, Options{})
+	m = arrive(t, m, []Item{remoteWorktree("zbox", "kakeibo", "main")})
+	m = typeText(t, m, "kakeibo")
+	if item, _ := m.selectedItem(); item.Host != "zbox" {
+		t.Fatalf("selected = %+v", item)
+	}
+	m = arrive(t, m, []Item{remoteWorktree("abox", "kakeibo", "main")})
+	if item, _ := m.selectedItem(); item.Host != "zbox" {
+		t.Fatalf("selected = %+v after abox answered, want still zbox", item)
 	}
 }

@@ -46,9 +46,16 @@ type Item struct {
 	// by name.
 	WorkspaceID string
 	State       ui.Session
+	// Host is the machine an item is on when it is not this one. Such an
+	// item comes with its Git and State, read over there; it can be
+	// switched to but not started from or merged.
+	Host string
+	Git  ui.Git
 }
 
 func (i Item) grouped() bool { return i.Kind == KindWorktree }
+
+func (i Item) remote() bool { return i.Host != "" }
 
 func (i Item) isMain() bool {
 	return i.Kind == KindWorktree && (i.Worktree == "main" || i.Worktree == "master")
@@ -71,8 +78,9 @@ type Backend interface {
 	// as an item of its own; the switcher keeps those that belong to none of
 	// its items.
 	Sessions() (map[string]ui.Session, []Item, error)
-	// Switch opens or focuses the session of an item.
-	Switch(item Item) error
+	// Switch opens or focuses the session of an item. A note says what is
+	// left for the user to do to see it, if anything.
+	Switch(item Item) (note string, err error)
 	// Create adds a feature worktree and returns it.
 	Create(req CreateRequest) (Item, error)
 	// Merge rebases a feature onto main, fast-forwards main, removes the
@@ -93,6 +101,9 @@ type Options struct {
 	// shows at once however long a scan of the roots takes.
 	Items []Item
 	Load  func() ([]Item, error)
+	// Remote sends the items of other machines as each answers, one
+	// machine at a time, and is closed when no more will come.
+	Remote <-chan []Item
 	// Here is the directory the switcher was opened from.
 	Here    string
 	Mode    Mode
@@ -122,9 +133,12 @@ type rowKind int
 const (
 	rowHeader rowKind = iota
 	rowItem
+	// rowHost heads the items of another machine, under a rowSpace
+	rowHost
+	rowSpace
 )
 
-// row is one line of the list: a project heading or an item.
+// row is one line of the list: a machine or project heading, or an item.
 type row struct {
 	kind    rowKind
 	item    int // index into model.items for rowItem
@@ -139,11 +153,12 @@ type model struct {
 	opts    Options
 	backend Backend
 	// items are the found ones, then the open workspaces among others
-	// that belong to none of them
+	// that belong to none of them, then the items of the other machines
 	items  []Item
 	found  []Item
 	others []Item
-	here   int // index of the item the switcher was opened from, -1 if none
+	remote map[string][]Item // by machine
+	here   int               // index of the item the switcher was opened from, -1 if none
 
 	itemsLoaded    bool
 	sessionsLoaded bool
@@ -212,7 +227,8 @@ func newModel(opts Options) model {
 }
 
 // joinItems lists the found items, then the open workspaces that belong to
-// none of them.
+// none of them, then the items of the other machines by name, each machine
+// having left out its own workspaces that belong to an item.
 func (m *model) joinItems() {
 	known := make(map[string]bool, len(m.found))
 	for _, item := range m.found {
@@ -223,6 +239,14 @@ func (m *model) joinItems() {
 		if !known[other.Session] {
 			m.items = append(m.items, other)
 		}
+	}
+	hosts := make([]string, 0, len(m.remote))
+	for host := range m.remote {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	for _, host := range hosts {
+		m.items = append(m.items, m.remote[host]...)
 	}
 	m.here = findHere(m.items, m.opts.Here)
 }
@@ -246,6 +270,10 @@ func findHere(items []Item, dir string) int {
 	dir = canonical(dir)
 	best, bestLen := -1, -1
 	for i, item := range items {
+		// a path over there may well exist here too
+		if item.remote() {
+			continue
+		}
 		path := canonical(item.Path)
 		rel, err := filepath.Rel(path, dir)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -275,10 +303,11 @@ func canonical(path string) string {
 // each worktree, the open sessions.
 func (m model) Init() tea.Cmd {
 	slow := tea.Tick(slowAfter, func(time.Time) tea.Msg { return slowMsg{} })
+	remote := m.waitRemote()
 	if !m.itemsLoaded {
-		return tea.Batch(m.loadItems(), m.loadSessions(), slow)
+		return tea.Batch(m.loadItems(), m.loadSessions(), remote, slow)
 	}
-	return tea.Batch(m.loadGit(m.found), m.loadSessions(), slow)
+	return tea.Batch(m.loadGit(m.found), m.loadSessions(), remote, slow)
 }
 
 // slowAfter is how long loading goes unremarked.
@@ -306,7 +335,29 @@ type doneMsg struct {
 	err      error
 }
 
-type switchedMsg struct{ err error }
+type switchedMsg struct {
+	note string
+	err  error
+}
+
+// remoteMsg is the items of one other machine.
+type remoteMsg struct{ items []Item }
+
+// waitRemote waits for the next machine to answer, nil when there is none
+// to wait for.
+func (m model) waitRemote() tea.Cmd {
+	remote := m.opts.Remote
+	if remote == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		items, ok := <-remote
+		if !ok {
+			return nil
+		}
+		return remoteMsg{items: items}
+	}
+}
 
 func (m model) loadItems() tea.Cmd {
 	load := m.opts.Load
@@ -377,8 +428,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessions = msg.sessions
 		}
 		m.others = msg.others
-		m.joinItems()
-		m.refilterKeepingCursor()
+		m.rejoinKeepingCursor()
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
@@ -386,9 +436,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.switchTo(*msg.switchTo)
+	case remoteMsg:
+		if len(msg.items) > 0 {
+			if m.remote == nil {
+				m.remote = map[string][]Item{}
+			}
+			m.remote[msg.items[0].Host] = msg.items
+			m.rejoinKeepingCursor()
+		}
+		return m, m.waitRemote()
 	case switchedMsg:
 		if msg.err != nil {
 			m.fail(msg.err)
+			return m, nil
+		}
+		if msg.note != "" {
+			m.busy, m.message = "", msg.note
 			return m, nil
 		}
 		return m, tea.Quit
@@ -459,7 +522,7 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+g":
 		item, ok := m.selectedItem()
 		if !ok || !mergeable(item) {
-			m.message = "Only a feature worktree can be merged into main."
+			m.message = "Only a feature worktree on this machine can be merged into main."
 			return m, nil
 		}
 		m.confirm = &item
@@ -473,14 +536,22 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // session is the multiplexer state of an item.
 func (m model) session(item Item) ui.Session {
-	if item.Kind == KindWorkspace {
+	if item.Kind == KindWorkspace || item.remote() {
 		return item.State
 	}
 	return m.sessions[item.Session]
 }
 
+// gitOf is the git state of an item.
+func (m model) gitOf(item Item) ui.Git {
+	if item.remote() {
+		return item.Git
+	}
+	return m.git[item.Path]
+}
+
 func mergeable(item Item) bool {
-	return item.Kind == KindWorktree && !item.isMain()
+	return item.Kind == KindWorktree && !item.isMain() && !item.remote()
 }
 
 // afterInput refilters when an edit changed the query.
@@ -509,8 +580,12 @@ func (m model) switchTo(item Item) (tea.Model, tea.Cmd) {
 	}
 	backend := m.backend
 	m.busy = "Opening " + item.Label + "…"
+	if item.remote() {
+		m.busy = "Opening " + item.Label + " on " + item.Host + "…"
+	}
 	return m, func() tea.Msg {
-		return switchedMsg{err: backend.Switch(item)}
+		note, err := backend.Switch(item)
+		return switchedMsg{note: note, err: err}
 	}
 }
 
@@ -589,15 +664,19 @@ func (m *model) move(delta int) {
 	m.clampScroll()
 }
 
-func (m *model) refilterKeepingCursor() {
+// rejoinKeepingCursor joins the items anew and keeps the cursor on the
+// item it was on. The rows point into the items by index, so the selected
+// item is read before joining reorders them.
+func (m *model) rejoinKeepingCursor() {
 	selected, ok := m.selectedItem()
 	onCreate := m.onCreate()
+	m.joinItems()
 	m.refilter()
 	if onCreate {
 		m.cursor = len(m.selectable())
 	} else if ok {
 		for i, r := range m.selectable() {
-			if item := m.items[m.rows[r].item]; item.Path == selected.Path && item.Label == selected.Label && item.WorkspaceID == selected.WorkspaceID {
+			if item := m.items[m.rows[r].item]; item.Path == selected.Path && item.Label == selected.Label && item.WorkspaceID == selected.WorkspaceID && item.Host == selected.Host {
 				m.cursor = i
 			}
 		}
@@ -629,9 +708,18 @@ func (m *model) refilter() {
 		if m.newMode && m.here >= 0 && m.items[m.here].grouped() && !sameProject(item, m.items[m.here]) {
 			continue
 		}
-		score, hits, ok := match(query, item.Label)
+		// an item over there matches by its machine too, so typing the
+		// machine lists what is on it
+		text := item.Label
+		if item.remote() {
+			text = item.Host + "/" + item.Label
+		}
+		score, hits, ok := match(query, text)
 		if !ok {
 			continue
+		}
+		if item.remote() {
+			hits = shift(hits, len([]rune(item.Host))+1)
 		}
 		s := scored{item: i, score: score}
 		if item.grouped() {
@@ -653,6 +741,7 @@ func (m *model) refilter() {
 	// ranked by their best match otherwise
 	type group struct {
 		project string
+		host    string
 		best    int
 		first   int
 		members []scored
@@ -661,13 +750,13 @@ func (m *model) refilter() {
 	byProject := map[string]*group{}
 	for order, s := range matches {
 		item := m.items[s.item]
-		key := "\x00" + item.Label + "\x00" + item.WorkspaceID
+		key := "\x00" + item.Host + "\x00" + item.Label + "\x00" + item.WorkspaceID
 		if item.grouped() {
-			key = item.Root + "\x00" + item.Project
+			key = item.Host + "\x00" + item.Root + "\x00" + item.Project
 		}
 		g, ok := byProject[key]
 		if !ok {
-			g = &group{project: item.Project, best: s.score, first: order}
+			g = &group{project: item.Project, best: s.score, first: order, host: item.Host}
 			byProject[key] = g
 			groups = append(groups, g)
 		}
@@ -680,11 +769,23 @@ func (m *model) refilter() {
 			sort.SliceStable(g.members, func(i, j int) bool { return g.members[i].score > g.members[j].score })
 		}
 	}
+	// this machine comes first, then every other one in its own section
+	sort.SliceStable(groups, func(i, j int) bool {
+		return groups[i].host == "" && groups[j].host != "" || groups[i].host != "" && groups[j].host != "" && groups[i].host < groups[j].host
+	})
 
 	// a project is one row, its main worktree, with its features indented
 	// below; when main is filtered out or missing, a heading stands in
 	m.rows = m.rows[:0]
+	host := ""
 	for _, g := range groups {
+		if g.host != host {
+			if len(m.rows) > 0 {
+				m.rows = append(m.rows, row{kind: rowSpace})
+			}
+			m.rows = append(m.rows, row{kind: rowHost, project: g.host})
+			host = g.host
+		}
 		if !m.items[g.members[0].item].grouped() {
 			for _, s := range g.members {
 				m.rows = append(m.rows, row{kind: rowItem, item: s.item, project: g.project, nameHits: s.nameHits})
@@ -759,6 +860,8 @@ func (m model) createRequest(query string) (*CreateRequest, string) {
 	if project, rest, ok := strings.Cut(branch, "/"); ok && rest != "" {
 		if main := m.mainOf(project); main != nil {
 			from, branch = main, rest
+		} else if host := m.hostOf(project); host != "" {
+			return nil, project + " is on " + host + ", start its features over there."
 		}
 	}
 	if from == nil && m.here >= 0 && m.items[m.here].grouped() {
@@ -783,14 +886,15 @@ func (m model) createRequest(query string) (*CreateRequest, string) {
 }
 
 // sameProject reports whether two items are worktrees of one project: a
-// project of the same name under another root is another project.
+// project of the same name under another root or on another machine is
+// another project.
 func sameProject(a, b Item) bool {
-	return a.grouped() && b.grouped() && a.Project == b.Project && a.Root == b.Root
+	return a.grouped() && b.grouped() && a.Project == b.Project && a.Root == b.Root && a.Host == b.Host
 }
 
-// mainOf returns the main worktree of a managed project, or any of its
-// worktrees when it has none. Of projects with the name under several roots
-// it prefers the one you are in.
+// mainOf returns the main worktree of a managed project on this machine,
+// or any of its worktrees when it has none. Of projects with the name under
+// several roots it prefers the one you are in.
 func (m model) mainOf(project string) *Item {
 	root := ""
 	if m.here >= 0 && m.items[m.here].grouped() && m.items[m.here].Project == project {
@@ -799,7 +903,7 @@ func (m model) mainOf(project string) *Item {
 	var any *Item
 	for i := range m.items {
 		item := &m.items[i]
-		if !item.grouped() || item.Project != project || root != "" && item.Root != root {
+		if !item.grouped() || item.remote() || item.Project != project || root != "" && item.Root != root {
 			continue
 		}
 		if item.isMain() {
@@ -810,4 +914,14 @@ func (m model) mainOf(project string) *Item {
 		}
 	}
 	return any
+}
+
+// hostOf names the other machine a managed project is on, if it is on one.
+func (m model) hostOf(project string) string {
+	for _, item := range m.items {
+		if item.remote() && item.grouped() && item.Project == project {
+			return item.Host
+		}
+	}
+	return ""
 }

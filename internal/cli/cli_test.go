@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"devtools/internal/hub"
+	"devtools/internal/peer"
 )
 
 func TestMain(m *testing.M) {
@@ -25,6 +27,13 @@ func TestMain(m *testing.M) {
 		os.Unsetenv(name)
 	}
 	os.Setenv("HERDR_BIN_PATH", filepath.Join(tmp, "no-herdr"))
+	// Nor ask the network for other machines: a devtools serve on the LAN
+	// would answer.
+	discoverPeers = func(context.Context, peer.Options) <-chan peer.Result {
+		ch := make(chan peer.Result)
+		close(ch)
+		return ch
+	}
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)
@@ -562,7 +571,8 @@ func TestSessionsOpensSwitcherOnOpenTmuxSessions(t *testing.T) {
 		if !sessions["ops"].Open || !sessions["ops"].Focused || !sessions["work"].Open || len(others) != 2 {
 			t.Fatalf("sessions = %+v, others = %+v", sessions, others)
 		}
-		return nil, opts.Backend.Switch(others[1])
+		_, err = opts.Backend.Switch(others[1])
+		return nil, err
 	})
 	var stdout, stderr bytes.Buffer
 
@@ -1184,6 +1194,7 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 		"if [ \"$1 $2\" = \"workspace close\" ] && [ -e \"$HERDR_KILLS_IN\" ]; then\necho 'killed devtools' >&2\nexit 1\nfi\n" +
 		"case \"$1 $2\" in\n" +
 		"'workspace list') printf '{\"result\":{\"workspaces\":[%s]}}\\n' \"$HERDR_WORKSPACES\";;\n" +
+		"'workspace create') echo '{\"result\":{\"root_pane\":{\"pane_id\":\"w9:p1\"}}}';;\n" +
 		"'tab list') echo '{\"result\":{\"tabs\":[]}}';;\n" +
 		"'pane list') echo '{\"result\":{\"panes\":[]}}';;\n" +
 		"'agent list') printf '{\"result\":{\"agents\":[%s]}}\\n' \"$HERDR_AGENTS\";;\n" +

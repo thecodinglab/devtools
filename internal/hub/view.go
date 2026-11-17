@@ -22,6 +22,9 @@ var (
 	// strong ink on the raised ground, so a match still shows on it
 	hitStyle      = ui.StrongText
 	selectedStyle = lipgloss.NewStyle().Foreground(ui.Strong)
+	// another machine heads its section in the comment grey, quieter than
+	// the projects under it
+	hostStyle = ui.CommentText
 )
 
 // seg is a run of text in one style.
@@ -103,11 +106,11 @@ func (m *model) clampScroll() {
 	rows := m.selectable()
 	if m.cursor < len(rows) {
 		r := rows[m.cursor]
-		// bring the project heading along when scrolling up to its first
-		// worktree
+		// bring the machine and project headings along when scrolling up
+		// to the first item below them
 		top := r
-		if r > 0 && m.rows[r-1].kind == rowHeader {
-			top = r - 1
+		for top > 0 && m.rows[top-1].kind != rowItem {
+			top--
 		}
 		if top < m.offset {
 			m.offset = top
@@ -126,6 +129,9 @@ type columns struct {
 func (m model) columns() columns {
 	var c columns
 	for _, r := range m.rows {
+		if r.kind == rowHost || r.kind == rowSpace {
+			continue
+		}
 		if r.kind == rowHeader {
 			c.name = max(c.name, lipgloss.Width(r.project))
 			continue
@@ -139,7 +145,7 @@ func (m model) columns() columns {
 		default:
 			c.name = max(c.name, lipgloss.Width(item.Label))
 		}
-		git := m.git[item.Path]
+		git := m.gitOf(item)
 		c.changes = max(c.changes, lipgloss.Width(ui.Changes(git)))
 		c.sync = max(c.sync, lipgloss.Width(ui.Sync(git)))
 		state, _ := ui.SessionState(m.session(item))
@@ -198,6 +204,12 @@ func (m model) loading(note string) string {
 }
 
 func (m model) rowLine(r row, cols columns, selected bool) string {
+	if r.kind == rowSpace {
+		return ""
+	}
+	if r.kind == rowHost {
+		return strings.Repeat(" ", gutter) + hostStyle.Render(r.project)
+	}
 	if r.kind == rowHeader {
 		segs := []seg{{strings.Repeat(" ", gutter), ui.Plain}}
 		segs = append(segs, highlight(r.project, r.projectHits, projectStyle, hitStyle)...)
@@ -230,7 +242,7 @@ func (m model) rowLine(r row, cols columns, selected bool) string {
 	segs = append(segs, name...)
 	segs = append(segs, seg{strings.Repeat(" ", max(0, cols.name-segsWidth(name))), ui.Plain})
 
-	git := m.git[item.Path]
+	git := m.gitOf(item)
 	session := m.session(item)
 	state, stateStyle := ui.SessionState(session)
 	for _, cell := range []struct {

@@ -87,3 +87,15 @@ func dedupe(positions []int) []int {
 	}
 	return out
 }
+
+// shift moves positions matched in a prefix-cut text back onto the text
+// after the cut, dropping the ones in the prefix.
+func shift(positions []int, cut int) []int {
+	var out []int
+	for _, p := range positions {
+		if p >= cut {
+			out = append(out, p-cut)
+		}
+	}
+	return out
+}

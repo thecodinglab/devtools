@@ -187,3 +187,14 @@ func run(name string, args ...string) error {
 	}
 	return nil
 }
+
+// SwitchRunning switches to a session, creating it in dir running command
+// first; the session ends with the command.
+func SwitchRunning(dir, session, command string) error {
+	if !hasSession(session) {
+		if err := run("tmux", "new-session", "-d", "-s", session, "-c", dir, command); err != nil {
+			return err
+		}
+	}
+	return run("tmux", "switch-client", "-t", session)
+}

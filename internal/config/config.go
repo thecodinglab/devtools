@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +17,13 @@ type Config struct {
 	Roots       []string
 	Bookmarks   []Bookmark
 	Multiplexer string
+	// Peers are machines asked for their projects directly, besides the
+	// ones a broadcast finds; Port is where devtools serve listens and
+	// queries go, 0 for the default; NoDiscovery keeps devtools from looking
+	// for other machines at all.
+	Peers       []string
+	Port        int
+	NoDiscovery bool
 }
 
 func Path() (string, error) {
@@ -68,6 +76,22 @@ func parse(path, content string) (Config, error) {
 				return Config{}, fmt.Errorf("%s:%d: multiplexer must be tmux or herdr", path, i+1)
 			}
 			cfg.Multiplexer = rest
+		case "peer":
+			if rest == "" || strings.ContainsAny(rest, " \t") {
+				return Config{}, fmt.Errorf("%s:%d: peer requires one host or host:port", path, i+1)
+			}
+			cfg.Peers = append(cfg.Peers, rest)
+		case "port":
+			port, err := strconv.Atoi(rest)
+			if err != nil || port <= 0 || port > 65535 {
+				return Config{}, fmt.Errorf("%s:%d: port must be a number from 1 to 65535", path, i+1)
+			}
+			cfg.Port = port
+		case "discovery":
+			if rest != "on" && rest != "off" {
+				return Config{}, fmt.Errorf("%s:%d: discovery must be on or off", path, i+1)
+			}
+			cfg.NoDiscovery = rest == "off"
 		default:
 			return Config{}, fmt.Errorf("%s:%d: unknown directive %q", path, i+1, directive)
 		}

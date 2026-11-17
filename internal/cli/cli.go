@@ -44,11 +44,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 type app struct {
-	roots []string
+	roots  []string
+	stdout io.Writer
 }
 
 func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
-	a := &app{}
+	a := &app{stdout: stdout}
 	cmd := &cobra.Command{
 		Use:           "devtools [--root PATH]... <command> [args]",
 		Short:         "Manage dev worktrees and their herdr or tmux sessions",
@@ -83,6 +84,9 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		agentPreviewCommand(stdout),
 		machinesCommand(stdout),
 		machinePreviewCommand(stdout),
+		serveCommand(a, stderr),
+		hostsCommand(stdout),
+		sessionOpenCommand(a),
 	)
 	return cmd
 }
@@ -787,6 +791,10 @@ func switchCommand(a *app) *cobra.Command {
 			targets = withBookmarks(targets, g.bookmarks)
 			matches, err := discovery.ResolveMatches(targets, args[0])
 			if err != nil {
+				// what is not here may be on another machine
+				if args[0] != "" && remoteQueryFallback() {
+					return a.openHubWith(g, targets, args[0])
+				}
 				return err
 			}
 			if len(matches) > 1 {

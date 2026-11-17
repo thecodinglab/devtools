@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,19 +52,29 @@ func (a *app) runHub(mode hub.Mode, query string, load func() ([]hub.Item, error
 			return err
 		}
 	}
-	b := hubBackend{app: a, backend: backend}
+	// the other machines are asked at once, and show as they answer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	remote, known := discover(ctx)
+	b := hubBackend{app: a, backend: backend, remotes: known}
 	item, err := runHub(hub.Options{
 		Load:          load,
+		Remote:        remote,
 		Here:          hubHere(),
 		Mode:          mode,
 		Query:         query,
 		Backend:       b,
 		SwitchInPlace: switchesInPlace(backend),
 	})
+	cancel()
 	if err != nil || item == nil {
 		return err
 	}
-	return b.Switch(*item)
+	note, err := b.Switch(*item)
+	if note != "" {
+		fmt.Fprintln(a.stdout, note)
+	}
+	return err
 }
 
 // switchesInPlace reports whether switching leaves the terminal alone, so
@@ -124,6 +136,7 @@ func rootOf(g globals, path string) string {
 type hubBackend struct {
 	app     *app
 	backend mux.Backend
+	remotes *remotes // the other machines that answered
 }
 
 func (b hubBackend) Status(path string) (ui.Git, error) {
@@ -224,16 +237,19 @@ func tmuxSessions() (map[string]ui.Session, []hub.Item, error) {
 	return sessions, others, nil
 }
 
-func (b hubBackend) Switch(item hub.Item) error {
+func (b hubBackend) Switch(item hub.Item) (string, error) {
+	if item.Host != "" {
+		return b.switchRemote(item)
+	}
 	if item.Kind != hub.KindWorkspace {
-		return b.app.switchSession(item.Path, item.Session)
+		return "", b.app.switchSession(item.Path, item.Session)
 	}
 	if b.backend == mux.Herdr {
-		return herdr.Visit(func() error {
+		return "", herdr.Visit(func() error {
 			return herdr.Client{}.FocusWorkspace(item.WorkspaceID)
 		})
 	}
-	return tmux.SwitchSession(item.Session)
+	return "", tmux.SwitchSession(item.Session)
 }
 
 func (b hubBackend) Create(req hub.CreateRequest) (hub.Item, error) {

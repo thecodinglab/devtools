@@ -62,6 +62,8 @@ devtools pick
 devtools sessions [--machine <label-or-id>]
 devtools agents [--machine <label-or-id>]
 devtools machines
+devtools serve [--name <name>] [--ssh <destination>] [--listen <addr>]
+devtools hosts
 devtools bookmark add <name> [path]
 devtools bookmark remove <name>
 devtools bookmark list
@@ -121,6 +123,71 @@ Keys:
 - `esc` clears the text, then closes
 
 `devtools sessions` opens it on the open workspaces only, and `devtools work` without a branch opens it to name a feature in the current project.
+
+The projects on [your other machines](#other-machines) show below this machine's, each machine under its name, as soon as it answers. Typing a machine's name lists what is on it, `macmini xcl` say.
+
+## Other machines
+
+When you work on several machines, the switcher lists the projects on all of them, wherever you open it. Every machine runs `devtools serve`. When the switcher opens, it broadcasts a query on the local network, and each machine that is awake answers with its worktrees, their git state and its open sessions. A machine that is asleep or switched off just doesn't answer, and its projects don't show. Finding the other machines needs no login. The answers only report what is there, and nothing on the network can change anything through them.
+
+Switching to a project on another machine goes over ssh, so that is the one moment ssh asks you to log in, a 1Password prompt say. devtools runs `devtools session-open` on that machine, which focuses the project's session there or creates it, the same way `switch` would on that machine. How you land in that session depends on where you opened the switcher:
+
+- From a plain terminal, ssh runs in the terminal and attaches to the session over there.
+- Inside herdr, if the machine is saved in herdr (`herdr machine add`, matched by label or ssh target) and its herdr server runs, devtools focuses the workspace on the machine through herdr. Then select the machine in the herdr sidebar to see it; herdr can't switch the machine it shows from the CLI. Otherwise devtools opens a local workspace named `machine:project/worktree` that runs the ssh.
+- Inside tmux, devtools opens a local session running the ssh.
+
+Features can't be started on another machine or merged from here; run devtools over there for that.
+
+### Setting up a machine
+
+Run `devtools serve` on each machine as a user service, so it starts at login. It needs `git` and `herdr` or `tmux` on its `PATH`, and the same config as your terminal (roots, bookmarks, multiplexer).
+
+```sh
+devtools serve --name macmini
+```
+
+`--name` is what the switcher calls the machine; it defaults to the short hostname. `--ssh` is the ssh destination other machines use to reach it, and defaults to the name, so an ssh config `Host macmini` entry is all a client needs. The ssh destination must have `devtools` on the `PATH` of a non-interactive shell.
+
+NixOS, with home-manager, in `systemd.user.services`:
+
+```nix
+devtools-serve = {
+  Unit.Description = "devtools serve";
+  Install.WantedBy = [ "default.target" ];
+  Service = {
+    ExecStart = "${devtools}/bin/devtools serve --name desktop";
+    # herdr: however you install herdr
+    Environment = [ "PATH=${lib.makeBinPath [ pkgs.git herdr ]}" ];
+    Restart = "on-failure";
+  };
+};
+```
+
+And let the other machines in: `networking.firewall.allowedUDPPorts = [ 47390 ];` and `networking.firewall.allowedTCPPorts = [ 47390 ];`.
+
+macOS, with nix-darwin, in `launchd.user.agents`:
+
+```nix
+devtools-serve.serviceConfig = {
+  ProgramArguments = [ "${devtools}/bin/devtools" "serve" "--name" "macmini" ];
+  EnvironmentVariables.PATH = "${lib.makeBinPath [ pkgs.git herdr ]}:/usr/bin:/bin";
+  RunAtLoad = true;
+  KeepAlive = true;
+  StandardErrorPath = "/tmp/devtools-serve.log";
+};
+```
+
+On macOS, the application firewall, if on, asks once whether `devtools` may accept incoming connections, and the terminal you run `devtools` in may ask for Local Network access the first time the switcher broadcasts.
+
+`devtools hosts` lists every machine that answered, this one included, with its address and how long it took, or why it couldn't be read. Start there when a machine doesn't show up.
+
+### Machines a broadcast doesn't reach
+
+A broadcast stays on the local network. Add a `peer` line to the [config](#configuration) for each machine to ask directly as well, across a VPN say. Queries and snapshots use UDP and TCP port 47390, which `port` changes on every machine at once.
+
+### What the network sees
+
+`devtools serve` answers anyone on a private network (10/8, 172.16/12, 192.168/16, link-local, the 100.64/10 range Tailscale uses, and the loopback) and refuses everyone else. Whoever can reach it sees your project names, paths, branch state and agent titles, without logging in, so run it on networks you trust. The answers can't make devtools run anything here: devtools passes ssh only a destination that can't be read as an option, quotes everything it sends to the other machine, and drops control characters from everything it draws. Set `discovery off` in the config to keep devtools from broadcasting at all.
 
 ## Commands
 
@@ -238,7 +305,7 @@ devtools switch repo/main
 devtools switch feature-api
 ```
 
-If no target is provided, or if a query matches multiple worktrees, [the switcher](#the-switcher) opens, with the query typed in.
+If no target is provided, or if a query matches multiple worktrees, [the switcher](#the-switcher) opens, with the query typed in. So does a query that matches nothing here, unless discovery is off, so the switcher can find it on [another machine](#other-machines).
 
 ### `pick`
 
@@ -290,6 +357,23 @@ devtools bookmark remove notes
 devtools switch dotfiles
 ```
 
+### `serve`
+
+Answers devtools on the other machines with this machine's projects and sessions, until stopped. Run it as a user service on every machine, see [Setting up a machine](#setting-up-a-machine). `--listen` picks the address, every address at the config `port` by default.
+
+```sh
+devtools serve --name desktop
+devtools serve --name macbook --ssh florian@macbook.local
+```
+
+### `hosts`
+
+Lists the machines that answer, this one included, each with its address, its ssh destination, and how many items it sent in how long, or why it couldn't be read.
+
+```sh
+devtools hosts
+```
+
 ## Configuration
 
 devtools reads an optional config file from `$DEVTOOLS_CONFIG`, falling back to `$XDG_CONFIG_HOME/devtools/config` and then `~/.config/devtools/config`. The format is line-based; blank lines and lines starting with `#` are ignored:
@@ -305,9 +389,21 @@ bookmark notes ~/Documents/notes
 
 # always use tmux, or herdr, regardless of $TMUX
 multiplexer tmux
+
+# machines to ask directly, besides the ones a broadcast finds
+peer 100.101.102.103
+peer macbook.tailnet.ts.net:47390
+
+# the UDP and TCP port of devtools serve, the same on every machine
+port 47390
+
+# never look for other machines
+discovery off
 ```
 
 `root` lines are used only when neither `--root` nor `DEVTOOLS_ROOT` is set. `bookmark` lines are managed by `devtools bookmark add` and `devtools bookmark remove`, but can also be edited by hand. `multiplexer` is overridden by `DEVTOOLS_MULTIPLEXER`.
+
+`peer`, `port` and `discovery` are about [other machines](#other-machines). Discovery is on by default; `devtools serve` reads `port` too, so keep it the same on every machine.
 
 ## Development
 

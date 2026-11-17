@@ -125,3 +125,26 @@ func TestLoadParsesMultiplexer(t *testing.T) {
 		t.Fatalf("err = %v, want invalid multiplexer", err)
 	}
 }
+
+func TestLoadParsesDiscovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	content := "peer macbook.local\npeer 100.64.1.2:4000\nport 4000\ndiscovery off\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(cfg.Peers, "|") != "macbook.local|100.64.1.2:4000" || cfg.Port != 4000 || !cfg.NoDiscovery {
+		t.Fatalf("config = %+v", cfg)
+	}
+	for _, bad := range []string{"peer\n", "peer a b\n", "port x\n", "port 70000\n", "discovery maybe\n"} {
+		if err := os.WriteFile(path, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
