@@ -140,10 +140,12 @@ func TestSwitchInsideHerdrRunsSSHInAWorkspaceOfItsOwn(t *testing.T) {
 	}
 }
 
-func TestSwitchInsideHerdrDrivesASavedMachine(t *testing.T) {
+func TestSwitchInsideAnUnpatchedHerdrOpensTheMachineOverSSH(t *testing.T) {
 	log := installFakeHerdr(t, testWorkspaces)
 	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
 	t.Setenv("HERDR_MACHINES", `{"id":"m1","label":"mini","target":"macmini","session":"default","enabled":true,"selected":false}`)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	stubDiscover(t, macmini(xcloudMain))
 	var note string
 	remoteFromHub(t, func(opts hub.Options, items []hub.Item) (*hub.Item, error) {
@@ -156,11 +158,20 @@ func TestSwitchInsideHerdrDrivesASavedMachine(t *testing.T) {
 	if code := Run([]string{"pick"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("pick returned %d, stderr=%s", code, stderr.String())
 	}
-	if got, want := herdrCalls(t, log), "--machine m1 workspace create --cwd /Users/f/dev/xcloud/main --label xcloud-main --focus"; !strings.Contains(got, want) {
-		t.Fatalf("herdr args =\n%s\nwant a line\n%s", got, want)
+	// no client takes the request to show the machine, so the project
+	// opens over ssh in a workspace here, with nothing left to the user
+	got := herdrCalls(t, log)
+	for _, want := range []string{
+		"--machine m1 workspace create --cwd /Users/f/dev/xcloud/main --label xcloud-main --focus",
+		"workspace create --cwd " + home + " --label macmini:xcloud/main --focus",
+		"pane run w9:p1 " + sshCommand + " -t macmini 'devtools session-open --session xcloud-main -- /Users/f/dev/xcloud/main' && exit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("herdr args =\n%s\nwant a line\n%s", got, want)
+		}
 	}
-	if !strings.Contains(note, "Select mini in the herdr sidebar") {
-		t.Fatalf("note = %q", note)
+	if note != "" {
+		t.Fatalf("note = %q, want none", note)
 	}
 }
 

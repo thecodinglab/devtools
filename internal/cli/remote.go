@@ -469,7 +469,12 @@ func (b hubBackend) switchRemote(item hub.Item) (string, error) {
 	case b.backend == mux.Herdr && herdr.Inside():
 		if host.multiplexer == string(mux.Herdr) && host.herdrRunning {
 			if machine, ok := savedMachine(host); ok {
-				return focusOnMachine(machine, item)
+				shown, err := showOnMachine(machine, item)
+				if err != nil || shown {
+					return "", err
+				}
+				// this window can't switch machines, a herdr client from
+				// before the activation patch say: open it over ssh instead
 			}
 		}
 		home, err := os.UserHomeDir()
@@ -504,7 +509,10 @@ func savedMachine(host remoteHost) (herdr.Machine, bool) {
 	return herdr.Machine{}, false
 }
 
-func focusOnMachine(machine herdr.Machine, item hub.Item) (string, error) {
+// showOnMachine focuses or creates the item's workspace on a saved herdr
+// machine and has this herdr window show it. It reports whether the window
+// does: only a client with the activation patch can switch machines.
+func showOnMachine(machine herdr.Machine, item hub.Item) (bool, error) {
 	client := herdr.Client{Machine: machine.ID}
 	workspace := item.WorkspaceID
 	var err error
@@ -514,14 +522,10 @@ func focusOnMachine(machine herdr.Machine, item hub.Item) (string, error) {
 		workspace, err = client.SwitchWorkspace(item.Path, item.Session)
 	}
 	if err != nil || machine.Selected {
-		return "", err
+		return err == nil, err
 	}
-	// a patched herdr client switches its window over; without the patch
-	// only the user can
-	if shown, err := herdr.ShowWorkspace(machine.ID, workspace); err == nil && shown {
-		return "", nil
-	}
-	return "Opened " + item.Label + " on " + item.Host + ". Select " + machine.Label + " in the herdr sidebar to see it.", nil
+	shown, err := herdr.ShowWorkspace(machine.ID, workspace)
+	return err == nil && shown, nil
 }
 
 // showLocal brings the herdr window back to Local when it shows another
