@@ -454,11 +454,12 @@ func remoteOpen(item hub.Item) string {
 	return strings.Join(quoted, " ")
 }
 
-// switchRemote lands on an item on another machine. With herdr, a machine
-// saved in herdr with its server running is driven through herdr, which
-// shows it in its sidebar. Anything else gets a session here that runs ssh
-// to the machine and opens the item's session over there, or, from a plain
-// terminal, ssh in the terminal itself. Only this asks for an ssh login.
+// switchRemote lands on an item on another machine without ever nesting a
+// multiplexer in another. Inside herdr the machine is saved in herdr, if it
+// isn't yet, and this window switches to the item's workspace over there,
+// the way a sidebar click does. Inside tmux the tmux client gives way to
+// ssh, which attaches to the session over there. From a plain terminal ssh
+// takes the terminal. Only this asks for an ssh login.
 func (b hubBackend) switchRemote(item hub.Item) (string, error) {
 	host, ok := b.remotes.get(item.Host)
 	if !ok {
@@ -467,52 +468,66 @@ func (b hubBackend) switchRemote(item hub.Item) (string, error) {
 	command := remoteOpen(item)
 	switch {
 	case b.backend == mux.Herdr && herdr.Inside():
-		if host.multiplexer == string(mux.Herdr) && host.herdrRunning {
-			if machine, ok := savedMachine(host); ok {
-				shown, err := showOnMachine(machine, item)
-				if err != nil || shown {
-					return "", err
-				}
-				// this window can't switch machines, a herdr client from
-				// before the activation patch say: open it over ssh instead
-			}
+		if host.multiplexer != string(mux.Herdr) {
+			return "", fmt.Errorf("%s keeps its sessions in %s, which this herdr window can't show", item.Host, host.multiplexer)
 		}
-		home, err := os.UserHomeDir()
+		if !host.herdrRunning {
+			return "", fmt.Errorf("herdr is not running on %s", item.Host)
+		}
+		machine, err := herdrMachine(host)
 		if err != nil {
 			return "", err
 		}
-		// a connection that ends closes its workspace, so picking the item
-		// again connects anew; one that fails stays open to show why
-		return "", herdr.Client{}.SwitchRunning(home, item.Host+":"+item.Label, sshLine(host, command)+" && exit")
+		return "", showOnMachine(machine, item)
 	case b.backend == mux.Tmux && os.Getenv("TMUX") != "":
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return "", tmux.SwitchRunning(home, tmux.SessionName(item.Host, item.Session), sshLine(host, command))
+		return "", tmux.DetachRunning(sshLine(host, command))
 	}
 	return "", runSSH(host, command)
 }
 
-// savedMachine finds the machine among herdr's saved ssh machines by its
-// name or its ssh destination.
-func savedMachine(host remoteHost) (herdr.Machine, bool) {
-	machines, err := herdr.ListMachines()
+// herdrMachine finds the machine among herdr's saved ssh machines by its
+// name or its ssh destination, saving it first if herdr doesn't know it and
+// turning it back on if it is off.
+func herdrMachine(host remoteHost) (herdr.Machine, error) {
+	machine, ok, err := findHerdrMachine(host)
 	if err != nil {
-		return herdr.Machine{}, false
+		return herdr.Machine{}, err
 	}
-	for _, machine := range machines {
-		if machine.Enabled && (machine.Label == host.name || machine.Target == host.ssh) {
-			return machine, true
+	if !ok {
+		if err := herdr.AddMachine(host.ssh, host.name); err != nil {
+			return herdr.Machine{}, err
+		}
+		if machine, ok, err = findHerdrMachine(host); err != nil || !ok {
+			return herdr.Machine{}, fmt.Errorf("herdr did not save %s: %v", host.name, err)
 		}
 	}
-	return herdr.Machine{}, false
+	if !machine.Enabled {
+		if err := herdr.EnableMachine(machine.ID); err != nil {
+			return herdr.Machine{}, err
+		}
+		machine.Enabled = true
+	}
+	return machine, nil
+}
+
+func findHerdrMachine(host remoteHost) (herdr.Machine, bool, error) {
+	machines, err := herdr.ListMachines()
+	if err != nil {
+		return herdr.Machine{}, false, err
+	}
+	for _, machine := range machines {
+		if machine.Label == host.name || machine.Target == host.ssh {
+			return machine, true, nil
+		}
+	}
+	return herdr.Machine{}, false, nil
 }
 
 // showOnMachine focuses or creates the item's workspace on a saved herdr
-// machine and has this herdr window show it. It reports whether the window
-// does: only a client with the activation patch can switch machines.
-func showOnMachine(machine herdr.Machine, item hub.Item) (bool, error) {
+// machine and has this herdr window show it. A window whose client
+// predates the activation patch can't switch machines; it gets a
+// notification saying where the workspace is.
+func showOnMachine(machine herdr.Machine, item hub.Item) error {
 	client := herdr.Client{Machine: machine.ID}
 	workspace := item.WorkspaceID
 	var err error
@@ -522,10 +537,14 @@ func showOnMachine(machine herdr.Machine, item hub.Item) (bool, error) {
 		workspace, err = client.SwitchWorkspace(item.Path, item.Session)
 	}
 	if err != nil || machine.Selected {
-		return err == nil, err
+		return err
 	}
-	shown, err := herdr.ShowWorkspace(machine.ID, workspace)
-	return err == nil && shown, nil
+	err = herdr.ShowWorkspace(machine.ID, workspace)
+	if errors.Is(err, herdr.ErrNoClient) {
+		return herdr.Client{}.Notify(item.Label+" is open on "+item.Host,
+			"This herdr window started before herdr could switch machines by itself: select "+machine.Label+" in the sidebar. Windows started since switch on their own.")
+	}
+	return err
 }
 
 // showLocal brings the herdr window back to Local when it shows another

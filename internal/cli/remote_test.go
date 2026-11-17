@@ -105,20 +105,18 @@ func TestSwitcherListsOtherMachinesAndSwitchesOverSSH(t *testing.T) {
 	}
 }
 
-func TestSwitchInsideHerdrRunsSSHInAWorkspaceOfItsOwn(t *testing.T) {
+func TestSwitchInsideHerdrSavesAnUnknownMachineInHerdrAndShowsIt(t *testing.T) {
 	log := installFakeHerdr(t, testWorkspaces)
 	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	took := patchedHerdrClient(t)
 	stubDiscover(t, macmini(xcloudMain))
+	var note string
 	remoteFromHub(t, func(opts hub.Options, items []hub.Item) (*hub.Item, error) {
 		if !opts.SwitchInPlace {
 			t.Fatal("inside herdr the switcher switches in place")
 		}
-		note, err := opts.Backend.Switch(items[0])
-		if note != "" {
-			t.Errorf("note = %q", note)
-		}
+		var err error
+		note, err = opts.Backend.Switch(items[0])
 		return nil, err
 	})
 
@@ -128,24 +126,56 @@ func TestSwitchInsideHerdrRunsSSHInAWorkspaceOfItsOwn(t *testing.T) {
 	}
 	got := herdrCalls(t, log)
 	for _, want := range []string{
-		"workspace create --cwd " + home + " --label macmini:xcloud/main --focus",
-		"pane run w9:p1 " + sshCommand + " -t macmini 'devtools session-open --session xcloud-main -- /Users/f/dev/xcloud/main' && exit",
+		"machine add macmini --label macmini",
+		"--machine 0123456789abcdef0123456789abcdef workspace create --cwd /Users/f/dev/xcloud/main --label xcloud-main --focus",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("herdr args =\n%s\nwant a line\n%s", got, want)
 		}
 	}
-	if strings.Contains(got, "--machine") {
-		t.Fatalf("herdr args = %s, macmini is no saved herdr machine", got)
+	assertNoNesting(t, got)
+	if requests := took(); len(requests) != 1 || requests[0].Machine != "0123456789abcdef0123456789abcdef" || requests[0].Workspace != "w9" {
+		t.Fatalf("requests = %+v", requests)
+	}
+	if note != "" {
+		t.Fatalf("note = %q", note)
 	}
 }
 
-func TestSwitchInsideAnUnpatchedHerdrOpensTheMachineOverSSH(t *testing.T) {
+// assertNoNesting fails when devtools ran a herdr in a herdr: a local
+// workspace running ssh to the other machine.
+func assertNoNesting(t *testing.T, herdrCalls string) {
+	t.Helper()
+	if strings.Contains(herdrCalls, "pane run") || strings.Contains(herdrCalls, " -t macmini") {
+		t.Fatalf("herdr args =\n%s\nwant no ssh in a pane here", herdrCalls)
+	}
+}
+
+func TestSwitchInsideHerdrTurnsADisabledMachineBackOn(t *testing.T) {
+	log := installFakeHerdr(t, testWorkspaces)
+	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
+	t.Setenv("HERDR_MACHINES", `{"id":"ad61d571470a4ff1010dece8eaf53b5c","label":"macmini","target":"macmini","session":"default","enabled":false,"selected":false}`)
+	patchedHerdrClient(t)
+	stubDiscover(t, macmini(xcloudMain))
+	remoteFromHub(t, func(opts hub.Options, items []hub.Item) (*hub.Item, error) {
+		_, err := opts.Backend.Switch(items[0])
+		return nil, err
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"pick"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("pick returned %d, stderr=%s", code, stderr.String())
+	}
+	got := herdrCalls(t, log)
+	if !strings.Contains(got, "machine enable ad61d571470a4ff1010dece8eaf53b5c") || strings.Contains(got, "machine add") {
+		t.Fatalf("herdr args =\n%s", got)
+	}
+}
+
+func TestSwitchInsideAnUnpatchedHerdrNeverNestsHerdr(t *testing.T) {
 	log := installFakeHerdr(t, testWorkspaces)
 	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
 	t.Setenv("HERDR_MACHINES", `{"id":"m1","label":"mini","target":"macmini","session":"default","enabled":true,"selected":false}`)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
 	stubDiscover(t, macmini(xcloudMain))
 	var note string
 	remoteFromHub(t, func(opts hub.Options, items []hub.Item) (*hub.Item, error) {
@@ -158,36 +188,28 @@ func TestSwitchInsideAnUnpatchedHerdrOpensTheMachineOverSSH(t *testing.T) {
 	if code := Run([]string{"pick"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("pick returned %d, stderr=%s", code, stderr.String())
 	}
-	// no client takes the request to show the machine, so the project
-	// opens over ssh in a workspace here, with nothing left to the user
+	// no client takes the request: the window says where the workspace is,
+	// and the switcher closes like after any switch
 	got := herdrCalls(t, log)
-	for _, want := range []string{
-		"--machine m1 workspace create --cwd /Users/f/dev/xcloud/main --label xcloud-main --focus",
-		"workspace create --cwd " + home + " --label macmini:xcloud/main --focus",
-		"pane run w9:p1 " + sshCommand + " -t macmini 'devtools session-open --session xcloud-main -- /Users/f/dev/xcloud/main' && exit",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("herdr args =\n%s\nwant a line\n%s", got, want)
-		}
+	if !strings.Contains(got, "notification show xcloud/main is open on macmini --body") {
+		t.Fatalf("herdr args =\n%s\nwant a notification", got)
 	}
+	assertNoNesting(t, got)
 	if note != "" {
-		t.Fatalf("note = %q, want none", note)
+		t.Fatalf("note = %q, want the switcher to close", note)
 	}
 }
 
-func TestSwitchInsideTmuxRunsSSHInASessionOfItsOwn(t *testing.T) {
+func TestSwitchInsideTmuxHandsTheTerminalToSSH(t *testing.T) {
 	bin := t.TempDir()
 	log := filepath.Join(t.TempDir(), "tmux.log")
-	// no session exists yet
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n[ \"$1\" = has-session ] && exit 1\nexit 0\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("TMUX_LOG", log)
 	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
-	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	b := hubBackend{backend: "tmux", remotes: &remotes{hosts: map[string]remoteHost{}}}
 	b.remotes.add(macmini().Snapshot)
@@ -195,9 +217,8 @@ func TestSwitchInsideTmuxRunsSSHInASessionOfItsOwn(t *testing.T) {
 	if _, err := b.Switch(items[0]); err != nil {
 		t.Fatal(err)
 	}
-	want := "has-session -t macmini-xcloud-main\n" +
-		"new-session -d -s macmini-xcloud-main -c " + home + " " + sshCommand + " -t macmini 'devtools session-open --session xcloud-main -- /Users/f/dev/xcloud/main'\n" +
-		"switch-client -t macmini-xcloud-main"
+	// the tmux client gives way to ssh: nothing over there runs in tmux here
+	want := "detach-client -E " + sshCommand + " -t macmini 'devtools session-open --session xcloud-main -- /Users/f/dev/xcloud/main'"
 	if got := readLog(t, log); got != want {
 		t.Fatalf("tmux args =\n%s\nwant\n%s", got, want)
 	}

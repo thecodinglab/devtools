@@ -247,35 +247,6 @@ func errorMessage(stderr []byte, err error) string {
 	return err.Error()
 }
 
-// SwitchRunning focuses the workspace for a session, creating it in dir
-// with command running in it first.
-func (c Client) SwitchRunning(dir, session, command string) error {
-	workspace, err := c.find(session)
-	if err != nil {
-		return err
-	}
-	if workspace != "" {
-		return c.FocusWorkspace(workspace)
-	}
-	out, err := c.output("workspace", "create", "--cwd", dir, "--label", session, "--focus")
-	if err != nil {
-		return err
-	}
-	pane, workspaceID, err := parseCreated(out)
-	if err != nil {
-		return err
-	}
-	if _, err := c.output("pane", "run", pane, command); err != nil {
-		// a workspace without its command would be found and focused next
-		// time, never running it
-		if workspaceID != "" {
-			c.output("workspace", "close", workspaceID)
-		}
-		return err
-	}
-	return nil
-}
-
 // parseCreated reads the root pane and the workspace id from herdr
 // workspace create.
 func parseCreated(out []byte) (string, string, error) {

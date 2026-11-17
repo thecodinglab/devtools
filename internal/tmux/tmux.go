@@ -188,13 +188,10 @@ func run(name string, args ...string) error {
 	return nil
 }
 
-// SwitchRunning switches to a session, creating it in dir running command
-// first; the session ends with the command.
-func SwitchRunning(dir, session, command string) error {
-	if !hasSession(session) {
-		if err := run("tmux", "new-session", "-d", "-s", session, "-c", dir, command); err != nil {
-			return err
-		}
-	}
-	return run("tmux", "switch-client", "-t", session)
+// DetachRunning hands the terminal of this tmux client over to command:
+// the client detaches and the terminal runs command in its place, so what
+// command attaches to is not nested in tmux. The sessions here keep
+// running.
+func DetachRunning(command string) error {
+	return run("tmux", "detach-client", "-E", command)
 }

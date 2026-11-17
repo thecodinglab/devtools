@@ -68,3 +68,24 @@ func (m Machine) RemoteArgs() []string {
 	}
 	return args
 }
+
+// AddMachine saves an ssh machine in herdr under label. Without a terminal
+// herdr never stops a remote server, uses the remote default session, and
+// reuses a compatible herdr already on the machine. Open herdr clients
+// load it within a second and connect.
+func AddMachine(target, label string) error {
+	_, err := output("machine", "add", target, "--label", label)
+	return err
+}
+
+// EnableMachine turns a saved machine back on.
+func EnableMachine(id string) error {
+	_, err := output("machine", "enable", id)
+	return err
+}
+
+// Notify shows a notification in the herdr windows of this server.
+func (c Client) Notify(title, body string) error {
+	_, err := c.output("notification", "show", title, "--body", body)
+	return err
+}

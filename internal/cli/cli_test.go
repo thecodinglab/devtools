@@ -32,7 +32,8 @@ func TestMain(m *testing.M) {
 	// Nor ask the herdr client of the developer to show anything, and give
 	// up on an acknowledgement quickly: the fake herdr has no client.
 	os.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
-	herdr.ActivationWait = 100 * time.Millisecond
+	herdr.ReceiveWait = 100 * time.Millisecond
+	herdr.DoneWait = time.Second
 	// Nor ask the network for other machines: a devtools serve on the LAN
 	// would answer.
 	discoverPeers = func(context.Context, peer.Options) <-chan peer.Result {
@@ -1204,7 +1205,9 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 		"'tab list') echo '{\"result\":{\"tabs\":[]}}';;\n" +
 		"'pane list') echo '{\"result\":{\"panes\":[]}}';;\n" +
 		"'agent list') printf '{\"result\":{\"agents\":[%s]}}\\n' \"$HERDR_AGENTS\";;\n" +
-		"'machine list') printf '[%s]\\n' \"$HERDR_MACHINES\";;\n" +
+		"'machine list') added=$(cat \"$HERDR_MACHINES_ADDED\" 2>/dev/null); printf '[%s%s%s]\\n' \"$HERDR_MACHINES\" \"${HERDR_MACHINES:+${added:+,}}\" \"$added\";;\n" +
+		// machine add <target> --label <label>
+		"'machine add') printf '{\"id\":\"0123456789abcdef0123456789abcdef\",\"label\":\"%s\",\"target\":\"%s\",\"session\":\"default\",\"enabled\":true,\"selected\":false}' \"$5\" \"$3\" > \"$HERDR_MACHINES_ADDED\";;\n" +
 		"'agent read') i=1; while [ \"$i\" -le \"$HERDR_PANE_LINES\" ]; do printf '%s line %s\\n' \"$3\" \"$i\"; i=$((i+1)); done;;\n" +
 		"'status server') if [ -z \"$HERDR_RUNNING\" ] || [ -e \"$HERDR_RUNNING\" ]; then echo '{\"running\":true}'; else echo '{\"running\":false}'; fi;;\n" +
 		"'server ') touch \"$HERDR_RUNNING\";;\n" +
@@ -1220,6 +1223,7 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 	t.Setenv("HERDR_LOG", log)
 	t.Setenv("HERDR_WORKSPACES", workspaces)
 	t.Setenv("HERDR_RUNNING", "")
+	t.Setenv("HERDR_MACHINES_ADDED", filepath.Join(t.TempDir(), "machines-added"))
 	t.Setenv("TMUX", "")
 	return log
 }
