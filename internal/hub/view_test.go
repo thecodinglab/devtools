@@ -457,7 +457,7 @@ func TestHubAtTwentyByFive(t *testing.T) {
 		t.Fatalf("row 0 = %q, want the input", rows[0])
 	}
 	// the name is cut at the end; the state stays (5a.6.7)
-	if !strings.Contains(strings.Join(rows[1:4], "\n"), "▌   m…   ◆ needs you") {
+	if !strings.Contains(strings.Join(rows[1:4], "\n"), "▌ dev…   ◆ needs you") {
 		t.Fatalf("the selected row is not in sight:\n%s", strings.Join(rows, "\n"))
 	}
 	if !strings.Contains(rows[4], "esc close") {
@@ -544,7 +544,7 @@ func TestTheHubColumnIsCentredAndAHundredWide(t *testing.T) {
 			}
 		}
 		// the ground of the selected row runs across the column
-		sel := rowOf(t, s, "▌   main")
+		sel := rowOf(t, s, "▌ devtools")
 		covered := 0
 		for _, r := range runsOf(t, s) {
 			if r.row == sel && strings.Contains(r.style, "on #30323a") {
@@ -564,7 +564,7 @@ func TestSelectedRowFillsTheMeasure(t *testing.T) {
 	for _, w := range []int{40, 80, 100} {
 		m := exampleHub(viewTruecolor(t), every, ModeAll, allEvents()...)
 		s := screenOf(m, w, 23)
-		sel := rowOf(t, s, "▌   main")
+		sel := rowOf(t, s, "▌ devtools")
 		cells := make([]bool, w)
 		for _, r := range runsOf(t, s) {
 			if r.row == sel && strings.Contains(r.style, "on #30323a") {
@@ -590,7 +590,7 @@ func TestSelectedRowFillsTheMeasure(t *testing.T) {
 func TestSelectedRowInThePaletteTierHasTheBarAndNoGround(t *testing.T) {
 	m := exampleHub(ui.Theme{}, every, ModeAll, allEvents()...)
 	s := screenOf(m, 80, 23)
-	sel := rowOf(t, s, "▌   main")
+	sel := rowOf(t, s, "▌ devtools")
 	for _, r := range runsOf(t, s) {
 		if r.row != sel {
 			continue
@@ -726,7 +726,7 @@ func TestStaleRowsAreItalicAndComment(t *testing.T) {
 		s := screenOf(m, 80, 23)
 		heading := rowOf(t, s, "macmini")
 		stale := map[int]bool{}
-		for y := heading + 1; y < heading+5; y++ {
+		for y := heading + 1; y < heading+3; y++ {
 			stale[y] = true
 		}
 		seen := map[int]bool{}
@@ -739,8 +739,8 @@ func TestStaleRowsAreItalicAndComment(t *testing.T) {
 				t.Fatalf("tier %d: stale row %d has a run %+v, want italic p8", i, r.row, r)
 			}
 		}
-		if len(seen) != 4 {
-			t.Fatalf("tier %d: styled stale rows %v, want the four rows of macmini:\n%s", i, seen, s.Runs())
+		if len(seen) != 2 {
+			t.Fatalf("tier %d: styled stale rows %v, want the two rows of macmini:\n%s", i, seen, s.Runs())
 		}
 	}
 }
@@ -763,8 +763,97 @@ func TestSelectedRowStaysInSightAtAnyDrawnHeight(t *testing.T) {
 		if len(rows) != sizes[1] {
 			t.Fatalf("%v: %d rows", sizes, len(rows))
 		}
-		if !strings.Contains(strings.Join(rows, "\n"), "▌   feature-29") {
+		if !strings.Contains(strings.Join(rows, "\n"), "▌ └ feature-29") {
 			t.Errorf("sized %d, drawn %d: the selected row is not in sight:\n%s", sizes[0], sizes[1], strings.Join(rows, "\n"))
 		}
+	}
+}
+
+// A project is one row, named by the project: its features branch off it
+// with a tee and, on the last one, an elbow, in comment; the ASCII set
+// draws them with | and `.
+func TestFeaturesBranchOffTheirProject(t *testing.T) {
+	ascii, err := ui.NewTheme(ui.ThemeOptions{UTF8: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		th         ui.Theme
+		tee, elbow string
+	}{{ui.Theme{}, "├", "└"}, {ascii, "|", "`"}} {
+		m := exampleHub(c.th, every, ModeAll, localEvents()...)
+		rows := plainRows(m, 80, 23)
+		for _, want := range []string{
+			" devtools ",
+			"  " + c.tee + " replace-herdr ",
+			"  " + c.elbow + " fix-footer ",
+			"  systems ",
+		} {
+			if !strings.Contains(strings.Join(rows, "\n"), want) {
+				t.Fatalf("no row %q:\n%s", want, strings.Join(rows, "\n"))
+			}
+		}
+		if strings.Contains(strings.Join(rows, "\n"), " main ") {
+			t.Fatalf("a main worktree is drawn by its own name:\n%s", strings.Join(rows, "\n"))
+		}
+	}
+	s := screenOf(exampleHub(viewTruecolor(t), every, ModeAll, localEvents()...), 80, 23)
+	branch := rowOf(t, s, "├ replace-herdr")
+	for _, r := range runsOf(t, s) {
+		if r.row == branch && r.col == 2 && r.style != "p8" {
+			t.Fatalf("the branch is drawn %q, want comment", r.style)
+		}
+	}
+}
+
+// A project whose main worktree is filtered out keeps its name above its
+// features, in comment: context, not a row to go to.
+func TestAProjectWithoutItsMainRowIsContext(t *testing.T) {
+	m := exampleHub(viewTruecolor(t), every, ModeAll, localEvents()...)
+	typeInto(m, "footer")
+	s := screenOf(m, 80, 23)
+	heading := rowOf(t, s, "  devtools")
+	if got := s.Row(heading + 1); !strings.HasPrefix(got, "▌ └ fix-footer") {
+		t.Fatalf("row under the project is %q, want the selected feature", got)
+	}
+	for _, r := range runsOf(t, s) {
+		if r.row == heading && r.col == 2 && r.style != "p8" {
+			t.Fatalf("the project's name is drawn %q, want comment", r.style)
+		}
+	}
+	if item, ok := m.selected(); !ok || item.Path != dtFooter.Path {
+		t.Fatalf("selected %+v, want fix-footer", item)
+	}
+}
+
+// Scrolling up onto a feature brings its project's row into sight with
+// it, so a branch is not drawn without its trunk.
+func TestScrollingUpOntoAFeatureShowsItsProject(t *testing.T) {
+	var items []Item
+	for i := range 12 {
+		items = append(items, worktree(fmt.Sprintf("a%02d", i), "main"))
+	}
+	items = append(items, worktree("devtools", "main"), worktree("devtools", "one"), worktree("devtools", "two"), worktree("devtools", "three"))
+	for i := range 12 {
+		items = append(items, worktree(fmt.Sprintf("z%02d", i), "main"))
+	}
+	m := exampleHub(ui.Theme{}, Features{}, ModeAll, on("", items...))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	for range len(items) {
+		m.Update(down)
+	}
+	for {
+		item, ok := m.selected()
+		if !ok {
+			t.Fatal("nothing selected")
+		}
+		if item.Project == "devtools" && item.Worktree == "three" {
+			break
+		}
+		m.Update(up)
+	}
+	rows := plainRows(m, 80, 12)
+	if !strings.HasSuffix(strings.TrimRight(rows[2], " "), " devtools") || !strings.HasPrefix(rows[5], "▌ └ three") {
+		t.Fatalf("the project is not above its selected feature:\n%s", strings.Join(rows, "\n"))
 	}
 }

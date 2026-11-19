@@ -1,23 +1,24 @@
 size 40x9 cursor 4,0 visible
   › Switch to a worktree, or na…   all|
   ────────────────────────────────────|
-  devtools|
-▌   main            ◆ needs you|
-    replace-herdr   ● working|
-    fix-footer        open|
-  systems|
+▌ devtools          ◆ needs you|
+  ├ replace-herdr   ● working|
+  └ fix-footer        open|
+  systems           ○ idle|
+  notes|
 |
   ⏎ switch   tab sessions   esc close|
 styles
 0 4 28 p8
 0 35 3 bold p4
 1 2 36 p8
-2 2 8 bold
-3 0 1 p4
-3 4 4 bold p4
-3 20 11 p3
-5 22 4 p8
-6 2 7 bold
+2 0 1 p4
+2 2 8 bold p4
+2 20 11 p3
+3 2 1 p8
+4 2 1 p8
+4 22 4 p8
+5 20 6 p8
 8 2 1 bold
 8 4 6 p8
 8 13 3 bold

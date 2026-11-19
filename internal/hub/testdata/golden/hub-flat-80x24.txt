@@ -1,14 +1,14 @@
 size 80x24 cursor 4,0 visible
   › Switch to a worktree, or name a new feature          all  sessions  agents|
   ────────────────────────────────────────────────────────────────────────────|
-  devtools|
-▌   main            3 changed    ↑2   ◆ needs you   Fix the hub footer|
-    replace-herdr                     ● working     Plan part 4|
-    fix-footer      1 changed           open|
-  systems|
-    main            12 changed   ↓1   ○ idle|
+▌ devtools          3 changed    ↑2   ◆ needs you   Fix the hub footer|
+  ├ replace-herdr                     ● working     Plan part 4|
+  └ fix-footer      1 changed           open|
+  systems           12 changed   ↓1   ○ idle|
   notes|
-    main|
+|
+|
+|
 |
 |
 |

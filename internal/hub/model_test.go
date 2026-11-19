@@ -555,7 +555,7 @@ func TestAThemeMessageRedrawsWithTheNewTheme(t *testing.T) {
 	}
 	m.Update(ui.ThemeMsg{Theme: ascii})
 	after := screenText(m)
-	if strings.Contains(after, "›") || !strings.Contains(after, "  > ") || !strings.Contains(after, "enter switch") || !strings.Contains(after, ">   main") {
+	if strings.Contains(after, "›") || !strings.Contains(after, "  > ") || !strings.Contains(after, "enter switch") || !strings.Contains(after, "> devtools") {
 		t.Fatalf("view after the theme changed to the ASCII set:\n%s", after)
 	}
 }
@@ -747,7 +747,7 @@ func TestNotesShowUnderTheirMachine(t *testing.T) {
 				}
 				at = i
 			}
-			if i := strings.Index(view, "main"); i < at {
+			if i := strings.Index(view, "blog"); i < at {
 				t.Fatalf("the notes are not above the machine's rows:\n%s", view)
 			}
 		})

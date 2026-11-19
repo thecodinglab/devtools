@@ -308,9 +308,10 @@ type dline struct {
 	row  int
 }
 
-// display is the list as lines. A project whose main worktree is a row is
-// drawn as its heading with the main worktree indented under it, like its
-// features (hub-all-80x24); a project without one gets the heading alone.
+// display is the list as lines. A project is one row, its main worktree,
+// named by the project, with its features branching off below it the way
+// git draws them; a project whose main worktree is filtered out or missing
+// gets its name alone in their place, as context.
 // While this machine has not answered yet and says nothing about it, its
 // place keeps two empty rows, so that the headings below do not move when
 // "Loading worktrees…" appears after ui.Slow.
@@ -333,10 +334,6 @@ func (m *Model) display() []dline {
 		case rowHeader:
 			ds = append(ds, dline{kind: dProject, row: i})
 		default:
-			item := m.items[r.item]
-			if item.Kind != KindAgent && item.grouped() && !r.child {
-				ds = append(ds, dline{kind: dProject, row: i})
-			}
 			ds = append(ds, dline{kind: dItem, row: i})
 		}
 	}
@@ -361,7 +358,9 @@ func (m *Model) selectedRow() int {
 
 // scroll is the first list line shown for a list of height lines, starting
 // from offset and moved no more than needed to show the selected row, with
-// the headings above it when they fit.
+// the headings above it, and for a feature its project's row and the
+// features between them, when they fit: moving up onto a branch brings its
+// trunk into sight.
 func (m *Model) scroll(offset, height int) int {
 	ds := m.display()
 	if sel := m.selectedRow(); sel >= 0 {
@@ -374,7 +373,7 @@ func (m *Model) scroll(offset, height int) int {
 		}
 		if at >= 0 {
 			top := at
-			for top > 0 && ds[top-1].kind != dItem {
+			for top > 0 && (ds[top-1].kind != dItem || ds[top].kind == dItem && m.rows[ds[top].row].child) {
 				top--
 			}
 			if at-top >= height {
@@ -421,9 +420,14 @@ func (m *Model) columns(w int) columns {
 			c.tab = max(c.tab, ui.Width(agentTab(item)))
 			continue
 		}
-		if item.grouped() {
+		switch {
+		case item.isMain():
+			// the project's row, or a feature when a project has both a
+			// main and a master
+			c.name = max(c.name, ui.Width(item.Project), indent+ui.Width(item.Worktree))
+		case item.grouped():
 			c.name = max(c.name, indent+ui.Width(item.Worktree))
-		} else {
+		default:
 			c.name = max(c.name, ui.Width(item.Label))
 		}
 		git := m.gitOf(item)
@@ -592,9 +596,11 @@ func (m *Model) displayLine(ds []dline, i int, cols columns, selected, w int) li
 	case dHeading:
 		return m.machineHeading(m.machines[m.rows[d.row].machine], w)
 	case dProject:
+		// the name of a project whose main worktree is not a row: context
+		// for the features below it, not a place to go
 		r := m.rows[d.row]
 		segs := []seg{spaces(gutter)}
-		segs = append(segs, highlight(m.theme.CutEnd(r.project, w-gutter-margin), r.projectHits, seg{role: ui.RoleStrong})...)
+		segs = append(segs, highlight(m.theme.CutEnd(r.project, w-gutter-margin), r.projectHits, seg{role: ui.RoleComment})...)
 		if m.staleAt(ds, i) {
 			staleSegs(segs)
 		}
@@ -607,7 +613,7 @@ func (m *Model) displayLine(ds []dline, i int, cols columns, selected, w int) li
 	if item.Kind == KindAgent {
 		segs = m.agentSegs(r, item, cols, on, w)
 	} else {
-		segs = m.itemSegs(r, item, cols, on, w)
+		segs = m.itemSegs(r, m.branchGlyph(d.row), item, cols, on, w)
 	}
 	if item.Stale {
 		staleSegs(segs)
@@ -702,16 +708,34 @@ func (m *Model) headingLine(name string, this bool, phrase string, failed bool, 
 	return line{segs: segs}
 }
 
+// branchGlyph is what a feature row draws before its name, the tee when
+// another feature of its project follows it and the elbow on the last one;
+// "" for a row that is not a feature.
+func (m *Model) branchGlyph(i int) string {
+	if !m.rows[i].child {
+		return ""
+	}
+	if next := i + 1; next < len(m.rows) && m.rows[next].kind == rowItem && m.rows[next].child {
+		return m.theme.Glyph(ui.GlyphTee)
+	}
+	return m.theme.Glyph(ui.GlyphElbow)
+}
+
 // itemSegs is a row of the scopes all and sessions: name, changes, sync,
-// state, title (5a.6.7).
-func (m *Model) itemSegs(r row, item Item, cols columns, selected bool, w int) []seg {
+// state, title (5a.6.7). A project's main worktree is named by its project;
+// a feature hangs off it by branch, in comment, indented under the
+// project's name.
+func (m *Model) itemSegs(r row, branch string, item Item, cols columns, selected bool, w int) []seg {
 	segs := m.gutterSegs(r.item == m.here, selected)
 	base := nameBase(r.item == m.here, selected)
 	var name []seg
-	if item.grouped() {
-		name = append(name, spaces(indent))
+	switch {
+	case item.grouped() && !r.child:
+		name = highlight(m.theme.CutEnd(item.Project, cols.name), r.projectHits, base)
+	case item.grouped():
+		name = append(name, seg{text: branch, role: ui.RoleComment}, spaces(indent-ui.Width(branch)))
 		name = append(name, highlight(m.theme.CutEnd(item.Worktree, cols.name-indent), r.nameHits, base)...)
-	} else {
+	default:
 		name = highlight(m.theme.CutEnd(item.Label, cols.name), r.nameHits, base)
 	}
 	segs = append(segs, name...)

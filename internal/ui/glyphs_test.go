@@ -10,7 +10,7 @@ var glyphNames = [glyphCount]string{
 	"here", "divider vertical", "divider horizontal", "pointer left", "pointer right",
 	"pointer up", "pointer down", "blocked", "done", "working", "idle", "bell", "failed",
 	"ellipsis", "prompt", "enter", "control", "ahead", "behind", "pad", "create",
-	"selected",
+	"selected", "branch", "last branch",
 }
 
 func TestEveryGlyphIsOneCellWide(t *testing.T) {
@@ -62,6 +62,10 @@ var e9Record = map[Glyph]rune{
 	GlyphPad:      0x00B7,
 	GlyphCreate:   0x002B,
 	GlyphSelected: 0x258C,
+	// the branches are from the block of the dividers, which E9 measured;
+	// they are provisional with it
+	GlyphTee:   0x251C,
+	GlyphElbow: 0x2514,
 }
 
 func TestTheGlyphTableMatchesTheRecordOfE9(t *testing.T) {
@@ -96,7 +100,7 @@ func codePoints(s string) string {
 // asciiRecord is the ASCII column of the table of 5a.7.2.
 var asciiRecord = [glyphCount]string{
 	"|", "|", "-", "<", ">", "^", "v", "?", "+", "*", "-", "!", "x",
-	"...", ">", "enter", "ctrl+", "^", "v", ".", "+", ">",
+	"...", ">", "enter", "ctrl+", "^", "v", ".", "+", ">", "|", "`",
 }
 
 func TestTheASCIISetIsASCII(t *testing.T) {

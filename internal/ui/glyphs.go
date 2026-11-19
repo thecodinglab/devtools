@@ -36,6 +36,8 @@ const (
 	GlyphPad                   // cells outside every pane
 	GlyphCreate                // the create row
 	GlyphSelected              // the selected row of a list, in the gutter
+	GlyphTee                   // a feature worktree under its project, with another below it
+	GlyphElbow                 // the last feature worktree under its project
 	glyphCount
 )
 
@@ -63,6 +65,8 @@ var utf8Glyphs = [glyphCount]string{
 	GlyphPad:      "·", // U+00B7
 	GlyphCreate:   "+",
 	GlyphSelected: "▌", // U+258C
+	GlyphTee:      "├", // U+251C
+	GlyphElbow:    "└", // U+2514
 }
 
 // asciiGlyphs is the ASCII set, by Glyph.
@@ -89,4 +93,6 @@ var asciiGlyphs = [glyphCount]string{
 	GlyphPad:      ".",
 	GlyphCreate:   "+",
 	GlyphSelected: ">",
+	GlyphTee:      "|",
+	GlyphElbow:    "`",
 }

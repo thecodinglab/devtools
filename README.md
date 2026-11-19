@@ -112,19 +112,23 @@ Feature branches are converted to filesystem-safe worktree names, so `feature/ex
 `devtools pick`, `devtools switch` without a target, `devtools sessions` and `devtools work` without a branch open the switcher, the hub: one list of every worktree, bookmark and open session. In a devtools window it opens over the window, the prefix key (`ctrl+space`) and `o` open it too; in tmux and herdr it runs in the pane or popup the command was typed in; from a plain terminal the window starts with it open.
 
 ```text
-  › Switch to a worktree, or name a new feature
+  › Switch to a worktree, or name a new feature          all  sessions  agents
+  ────────────────────────────────────────────────────────────────────────────
+  curiensis-website    8 changed
+▎ devtools             5 changed
+  └ popup-redesign     3 changed   ↑2   ● working     Rework the switcher
+  kakeibo              1 changed   ↑2     open
+  xcloud               8 changed        ○ idle        Slow VM spawn on prod-node-5801
+  ├ feature-refactor                    ◆ needs you   Approve rm?
+  └ fix-login                             open
 
-  curiensis-website     8 changed
-▎ devtools              5 changed
-    popup-redesign      3 changed   ↑2   working     Rework the switcher
-  kakeibo               1 changed   ↑2   open
-  xcloud                8 changed        idle        Slow VM spawn on prod-node-5801
-    feature-refactor                     needs you   Approve rm?
+  macmini ────────────────────────────────────────────────────────────────────
+  blog                                  ● working     Draft the post
 
-  ⏎ switch   ⌃N new feature   ⌃G merge into main   tab open only
+  ⏎ switch   ⌃N new feature   ⌃G merge into main   tab sessions   esc close
 ```
 
-Each project is one row, standing for its main worktree, with its feature worktrees indented below. The marked row is where you are: the current directory. The columns are uncommitted changes, how far the branch is ahead of and behind its upstream, and the state of its session: `open`, or what its agent is doing (`working`, `idle`, `done`, `needs you`) followed by the agent's terminal title. A clean, pushed worktree without a session shows nothing.
+Each project is one row, named by the project and standing for its main worktree, with its feature worktrees branching off below it the way `git log --graph` draws them. When a filter leaves out the main worktree, the project's name stays above its features in a dim colour, as context rather than a row to pick. The marked row is where you are: the current directory. The columns are uncommitted changes, how far the branch is ahead of and behind its upstream, and the state of its session: `open`, or what its agent is doing (`working`, `idle`, `done`, `needs you`) followed by the agent's terminal title. A clean, pushed worktree without a session shows nothing.
 
 Typing filters the list the way fzf does. When the text names no existing worktree, it can become a feature: the last row offers `New feature <name> in <project>, from <worktree>`, branching from the worktree you are in, and enter on it creates the worktree and switches to it. Spaces become dashes. Prefix the name with a project, `xcloud/fix-login`, to start it in another project from its main worktree.
 
