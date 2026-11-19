@@ -1,0 +1,6 @@
+# DSR 5 and the cursor position report
+size 80 24
+write "\x1b[5n"
+expect replies "\x1b[0n"
+write "\x1b[3;7H\x1b[6n"
+expect replies "\x1b[3;7R"

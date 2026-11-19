@@ -1,0 +1,11 @@
+# the alternate screen neither feeds nor renumbers the history; its rows are the lines from base on
+size 10 3
+write "a\r\nb\r\nc\r\nd\r\ne"
+write "\x1b[?1049h\x1b[H1\r\n2\r\n3\r\n4\r\n5"
+expect range 0 2
+expect line 2 "3"
+expect line 4 "5"
+write "\x1b[?1049l"
+expect range 0 2
+expect line 0 "a"
+expect line 4 "e"

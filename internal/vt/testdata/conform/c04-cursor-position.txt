@@ -1,0 +1,12 @@
+# CUP, CHA, VPA and the relative moves
+size 20 10
+write "\x1b[5;7H"
+expect cursor 6 4
+write "\x1b[2A\x1b[3D"
+expect cursor 3 2
+write "\x1b[4B\x1b[10C"
+expect cursor 13 6
+write "\x1b[2G\x1b[9d"
+expect cursor 1 8
+write "\x1b[E\x1b[3F"
+expect cursor 0 6

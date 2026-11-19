@@ -1,0 +1,5 @@
+# a Prepend character (U+11A87) would swallow the cell after it when parsed: it becomes U+FFFD
+size 10 3
+write "\U00011A870 ok"
+expect styled 0 "�0 ok"
+expect cursor 5 0

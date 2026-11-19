@@ -1,0 +1,17 @@
+provisional (E1): synthetic-tui.tm and synthetic-tui.raw are not a recording
+of a program. They are written by synthRecording in replay_test.go, a
+scripted stream of what a shell and a full-screen program draw (colours,
+wide characters, a link, the alternate screen, a scroll region,
+synchronized output, cursor shapes, four resizes), so that the replay group
+C16 has a fixture before E1's recordings exist. "go test ./internal/vt
+-update" rewrites them and TestTheSyntheticRecordingIsCurrent keeps them in
+step with the generator.
+
+The user's recordings of Claude Code, nvim and zsh (E1, docs/replace-herdr/
+experiments/e1-engine-replay.md) replace them. Committing a recording here
+needs the user's go-ahead (9.6): he reads it first, because it becomes
+public with the push of 8.6.
+
+Format: util-linux script --logging-format advanced; the timing log names
+COLUMNS and LINES in its header, O entries are output, S SIGWINCH entries
+are resizes.

@@ -1,0 +1,8 @@
+# OSC 0 and OSC 2 set the title
+size 80 24
+write "\x1b]0;first\x07"
+expect title "first"
+write "\x1b]2;second\x1b\\"
+expect title "second"
+write "\x1b]1;icon only\x07"
+expect title ""

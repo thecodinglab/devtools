@@ -1,0 +1,6 @@
+# DECRQM for 2026, 2004, 1004 and 2027
+size 80 24
+write "\x1b[?2026$p\x1b[?2004$p\x1b[?1004$p\x1b[?2027$p"
+expect replies "\x1b[?2026;2$y\x1b[?2004;2$y\x1b[?1004;2$y\x1b[?2027;1$y"
+write "\x1b[?2004h\x1b[?1004h\x1b[?2004$p\x1b[?1004$p"
+expect replies "\x1b[?2004;1$y\x1b[?1004;1$y"

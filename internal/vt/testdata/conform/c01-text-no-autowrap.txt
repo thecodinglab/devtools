@@ -1,0 +1,6 @@
+# with DECAWM off the last column is overwritten
+size 5 3
+write "\x1b[?7labcdefg"
+expect row 0 "abcdg"
+expect row 1 ""
+write "\x1b[?7h"

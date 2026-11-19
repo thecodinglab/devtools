@@ -1,0 +1,8 @@
+# mode 47 switches screens without clearing
+size 20 5
+write "primary\x1b[?47h"
+expect alt true
+write "\x1b[Hsecond"
+expect row 0 "second"
+write "\x1b[?47l"
+expect row 0 "primary"

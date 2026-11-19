@@ -1,0 +1,7 @@
+# the last column leaves the cursor there until the next character
+size 10 4
+write "0123456789"
+expect cursor 9 0
+write "\r\nx"
+expect row 1 "x"
+expect row 2 ""

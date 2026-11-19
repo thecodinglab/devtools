@@ -1,0 +1,5 @@
+# DECSC and DECRC save the position and the style
+size 20 5
+write "\x1b[3;4H\x1b[1m\x1b7\x1b[H\x1b[0mx\x1b8y"
+expect cursor 4 2
+expect styled 2 "   \x1b[0;1my"

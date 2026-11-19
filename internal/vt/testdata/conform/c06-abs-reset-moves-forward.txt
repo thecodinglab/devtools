@@ -1,0 +1,9 @@
+# a full reset loses the anchor: numbering goes on above every number handed out
+size 10 3
+write "a\r\nb\r\nc\r\nd\r\ne"
+write "\x1bc"
+expect range 5 5
+write "x\r\ny"
+expect range 5 5
+expect line 5 "x"
+expect line 6 "y"

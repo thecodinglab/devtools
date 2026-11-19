@@ -1,0 +1,4 @@
+# writing over half of a wide character clears the whole of it
+size 10 3
+write "漢字\x1b[1;2Hx"
+expect row 0 " x字"

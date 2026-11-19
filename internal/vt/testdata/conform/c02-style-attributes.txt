@@ -1,0 +1,4 @@
+# every attribute of the grammar, each from reset
+size 60 3
+write "\x1b[1mb\x1b[0m\x1b[2mf\x1b[0m\x1b[3mi\x1b[0m\x1b[5mk\x1b[0m\x1b[7mr\x1b[0m\x1b[8mh\x1b[0m\x1b[9ms\x1b[0m\x1b[4mu"
+expect styled 0 "\x1b[0;1mb\x1b[0;2mf\x1b[0;3mi\x1b[0;5mk\x1b[0;7mr\x1b[0;8mh\x1b[0;9ms\x1b[0;4mu"

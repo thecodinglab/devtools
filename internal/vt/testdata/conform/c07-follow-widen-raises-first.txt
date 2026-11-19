@@ -1,0 +1,9 @@
+# a widening reflow joins rows above the screen: the rows keep the numbers counted from the screen, so first rises
+size 5 3
+write "0123456789abc\r\n1\r\n2\r\n3"
+expect range 0 3
+resize 10 3
+expect range 1 3
+expect line 1 "0123456789"
+expect line 2 "abc"
+expect line 3 "1"

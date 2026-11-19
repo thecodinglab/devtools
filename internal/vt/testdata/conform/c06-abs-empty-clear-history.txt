@@ -1,0 +1,6 @@
+# erasing an empty history changes no number
+size 10 3
+write "a\r\nb"
+write "\x1b[3J"
+expect range 0 0
+expect line 1 "b"

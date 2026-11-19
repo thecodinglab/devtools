@@ -1,0 +1,7 @@
+# a soft-wrapped line is joined again when the screen widens
+size 10 4
+write "0123456789abcdef\r\nnext"
+expect row 1 "abcdef"
+resize 20 4
+expect row 0 "0123456789abcdef"
+expect row 1 "next"

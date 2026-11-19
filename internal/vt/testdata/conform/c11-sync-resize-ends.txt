@@ -1,0 +1,6 @@
+# a resize ends synchronized output
+size 80 24
+write "\x1b[?2026h"
+expect sync true
+resize 90 24
+expect sync false

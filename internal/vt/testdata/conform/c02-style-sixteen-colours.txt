@@ -1,0 +1,4 @@
+# the eight colours and their bright forms, foreground and background
+size 80 3
+write "\x1b[30ma\x1b[37mb\x1b[90mc\x1b[97md\x1b[39;40me\x1b[47mf\x1b[100mg\x1b[107mh"
+expect styled 0 "\x1b[0;30ma\x1b[0;37mb\x1b[0;90mc\x1b[0;97md\x1b[0;40me\x1b[0;47mf\x1b[0;100mg\x1b[0;107mh"

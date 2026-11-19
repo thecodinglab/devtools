@@ -1,0 +1,8 @@
+# DECCKM and the application keypad
+size 80 24
+write "\x1b[?1h"
+expect keys appcursor
+write "\x1b="
+expect keys appcursor,appkeypad
+write "\x1b[?1l\x1b>"
+expect keys none

@@ -1,0 +1,4 @@
+# X10 mouse reporting counts as press
+size 80 24
+write "\x1b[?9h"
+expect mouse press

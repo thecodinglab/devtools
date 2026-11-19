@@ -1,0 +1,4 @@
+# BEL rings; a BEL that ends an OSC does not
+size 80 24
+write "\x07a\x07\x1b]2;t\x07"
+expect bell 2

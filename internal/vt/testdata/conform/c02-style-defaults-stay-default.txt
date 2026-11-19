@@ -1,0 +1,5 @@
+# default colours are never written, also after the theme changed
+size 40 3
+colors #e6e7eb #30323a dark
+write "\x1b[39;49mplain\x1b]10;#ff0000\x07\x1b]11;#00ff00\x07 still"
+expect styled 0 "plain still"

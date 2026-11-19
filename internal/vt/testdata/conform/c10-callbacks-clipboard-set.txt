@@ -1,0 +1,6 @@
+# OSC 52 set is decoded and delivered; an empty one is not
+size 80 24
+write "\x1b]52;c;aGVsbG8gd29ybGQ=\x07"
+expect clipboard "hello world"
+write "\x1b]52;c;\x07"
+expect clipboard ""

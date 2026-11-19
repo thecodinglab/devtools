@@ -1,0 +1,6 @@
+# primary device attributes
+size 80 24
+write "\x1b[c"
+expect replies "\x1b[?62;22c"
+write "\x1b[0c"
+expect replies "\x1b[?62;22c"

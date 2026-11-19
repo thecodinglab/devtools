@@ -1,0 +1,6 @@
+# CR returns to column 0, LF moves down and keeps the column
+size 20 4
+write "abc\ndef\rX"
+expect row 0 "abc"
+expect row 1 "X  def"
+expect cursor 1 1

@@ -1,0 +1,6 @@
+# the kitty keyboard query answers the current flags
+size 80 24
+write "\x1b[?u"
+expect replies "\x1b[?0u"
+write "\x1b[>1u\x1b[?u"
+expect replies "\x1b[?1u"

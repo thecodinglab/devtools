@@ -1,0 +1,6 @@
+# scrolling on the alternate screen feeds no history
+size 10 3
+write "\x1b[?1049h1\r\n2\r\n3\r\n4\r\n5\x1b[?1049l\x1b[H\x1b[2Jp"
+resize 10 6
+expect row 0 "p"
+expect row 1 ""

@@ -1,0 +1,10 @@
+# IL and DL move the lines below the cursor
+size 10 5
+write "1\r\n2\r\n3\r\n4\r\n5\x1b[2;1H\x1b[L"
+expect row 1 ""
+expect row 2 "2"
+expect row 4 "4"
+write "\x1b[1;1H\x1b[2M"
+expect row 0 "2"
+expect row 2 "4"
+expect row 3 ""

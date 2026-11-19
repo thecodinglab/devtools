@@ -1,0 +1,4 @@
+# attributes come in the order of the grammar, whatever order the program set them in
+size 40 3
+write "\x1b[4;9;1;7;3mx"
+expect styled 0 "\x1b[0;1;3;7;9;4mx"

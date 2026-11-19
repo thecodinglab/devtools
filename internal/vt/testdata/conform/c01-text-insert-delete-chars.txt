@@ -1,0 +1,8 @@
+# ICH, DCH and ECH
+size 10 4
+write "abcdef\x1b[1;3H\x1b[2@"
+expect row 0 "ab  cdef"
+write "\x1b[1;1H\x1b[3P"
+expect row 0 " cdef"
+write "\x1b[1;2H\x1b[2X"
+expect row 0 "   ef"

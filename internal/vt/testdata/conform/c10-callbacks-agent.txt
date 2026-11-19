@@ -1,0 +1,10 @@
+# OSC 7501 is parsed by the library; root records reach OnAgent with its names
+size 80 24
+write "\x1b]7501;state=working\x1b\\"
+expect agent "working" ""
+write "\x1b]7501;state=blocked:kind=permission:app=claude-code\x07"
+expect agent "blocked" "permission"
+write "\x1b]7501;state=done:id=sub/1\x1b\\"
+expect agent "" ""
+write "\x1b]7501;state=idle\x1b\\"
+expect agent "idle" ""

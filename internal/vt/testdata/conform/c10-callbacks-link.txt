@@ -1,0 +1,4 @@
+# an OSC 8 link stays on its cells
+size 40 3
+write "see \x1b]8;id=x;https://example.com/a\x1b\\here\x1b]8;;\x1b\\ now"
+expect styled 0 "see \x1b]8;;https://example.com/a\x1b\\here\x1b]8;;\x1b\\ now"

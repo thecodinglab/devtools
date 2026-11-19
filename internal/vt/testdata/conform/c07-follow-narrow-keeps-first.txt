@@ -1,0 +1,10 @@
+# a narrowing reflow adds rows above the screen: first stays and the rows are numbered upward from it
+size 10 3
+write "0123456789abc\r\n1\r\n2\r\n3"
+expect range 0 2
+expect line 2 "1"
+resize 5 3
+expect range 0 3
+expect line 0 "01234"
+expect line 2 "abc"
+expect line 3 "1"

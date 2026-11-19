@@ -1,0 +1,6 @@
+# moves stop at the edges
+size 10 5
+write "\x1b[99;99H"
+expect cursor 9 4
+write "\x1b[99A\x1b[99D"
+expect cursor 0 0

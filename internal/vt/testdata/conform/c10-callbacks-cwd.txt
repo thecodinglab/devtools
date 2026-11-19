@@ -1,0 +1,10 @@
+# OSC 7: a file URL of this host gives its path; another host and an empty report are ignored
+size 80 24
+write "\x1b]7;file:///home/u/dev\x07"
+expect cwd "/home/u/dev"
+write "\x1b]7;file://another-machine/home/u\x07"
+expect cwd ""
+write "\x1b]7;\x07"
+expect cwd ""
+write "\x1b]7;file://localhost/tmp\x1b\\"
+expect cwd "/tmp"

@@ -1,0 +1,4 @@
+# XTVERSION is the devtools identity of the adapter, never libghostty
+size 80 24
+write "\x1b[>q"
+expect replies "\x1bP>|devtools 9.8.7-test test-host\x1b\\"

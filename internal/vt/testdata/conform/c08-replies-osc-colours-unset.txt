@@ -1,0 +1,4 @@
+# before any colour is set the library does not answer OSC 10 and 11
+size 80 24
+write "\x1b]10;?\x07\x1b]11;?\x07"
+expect replies ""

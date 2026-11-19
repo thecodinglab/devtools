@@ -1,0 +1,5 @@
+# title reporting is off: CSI 21 t gets no answer
+size 80 24
+write "\x1b]2;secret\x07\x1b[21t"
+expect replies ""
+expect title "secret"

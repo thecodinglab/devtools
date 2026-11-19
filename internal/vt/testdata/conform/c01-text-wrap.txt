@@ -1,0 +1,6 @@
+# a line longer than the width wraps onto the next row
+size 10 4
+write "0123456789abc"
+expect row 0 "0123456789"
+expect row 1 "abc"
+expect cursor 3 1

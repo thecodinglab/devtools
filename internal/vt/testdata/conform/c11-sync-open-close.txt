@@ -1,0 +1,7 @@
+# mode 2026 opens and closes synchronized output
+size 80 24
+expect sync false
+write "\x1b[?2026h"
+expect sync true
+write "\x1b[?2026l"
+expect sync false

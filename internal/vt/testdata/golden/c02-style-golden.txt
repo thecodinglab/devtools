@@ -1,0 +1,10 @@
+size 30x4 cursor 5,2 visible
+ status|
+red curly|
+ rev|
+|
+styles
+0 0 8 bold #e6e7eb on #30323a
+1 0 3 p1
+1 4 5 curly-underline ul p1
+2 0 5 reverse

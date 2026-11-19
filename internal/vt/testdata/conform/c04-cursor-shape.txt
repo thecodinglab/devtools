@@ -1,0 +1,9 @@
+# DECSCUSR sets the shape and the blink
+size 10 3
+expect cursor 0 0 block
+write "\x1b[3 q"
+expect cursor 0 0 underline blink
+write "\x1b[6 q"
+expect cursor 0 0 bar steady
+write "\x1b[0 q"
+expect cursor 0 0 block

@@ -1,0 +1,8 @@
+# the colour scheme query answers dark or light from the colours
+size 80 24
+colors #c0caf5 #1a1b26 dark
+write "\x1b[?996n"
+expect replies "\x1b[?997;1n"
+colors #000000 #ffffff
+write "\x1b[?996n"
+expect replies "\x1b[?997;2n"

@@ -1,0 +1,6 @@
+# IND, RI and NEL
+size 10 4
+write "a\x1bDb\x1bEc\x1bM\x1bMd"
+expect row 0 "ad"
+expect row 1 " b"
+expect row 2 "c"

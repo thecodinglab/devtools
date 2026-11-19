@@ -1,0 +1,9 @@
+# bracketed paste and focus reports
+size 80 24
+expect keys none
+write "\x1b[?2004h"
+expect keys paste
+write "\x1b[?1004h"
+expect keys paste,focus
+write "\x1b[?2004l\x1b[?1004l"
+expect keys none

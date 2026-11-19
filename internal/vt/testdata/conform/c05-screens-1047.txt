@@ -1,0 +1,6 @@
+# mode 1047 clears the alternate screen when it is left
+size 20 5
+write "keep\x1b[?1047hxx\x1b[?1047l\x1b[?1047h"
+expect row 0 ""
+write "\x1b[?1047l"
+expect row 0 "keep"

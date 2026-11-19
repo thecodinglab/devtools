@@ -1,0 +1,11 @@
+# mouse tracking modes and the SGR format
+size 80 24
+expect mouse none
+write "\x1b[?1000h"
+expect mouse press
+write "\x1b[?1002h"
+expect mouse drag
+write "\x1b[?1003h\x1b[?1006h"
+expect mouse all sgr
+write "\x1b[?1003l\x1b[?1006l"
+expect mouse none

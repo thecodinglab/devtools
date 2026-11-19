@@ -1,0 +1,4 @@
+# a styled screen as the golden files show it
+size 30 4
+write "\x1b[1;38;2;230;231;235;48;2;48;50;58m status \x1b[0m\r\n\x1b[31mred\x1b[0m \x1b[4:3;58;5;1mcurly\x1b[0m\r\n\x1b[7m rev \x1b[0m"
+golden c02-style-golden

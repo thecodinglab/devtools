@@ -1,0 +1,11 @@
+# alternate screen restores the primary screen and the cursor
+size 20 5
+write "hello\r\n"
+write "\x1b[?1049h\x1b[2Jalt"
+expect alt true
+expect row 1 "alt"
+write "\x1b[?1049l"
+expect alt false
+expect row 0 "hello"
+expect cursor 0 1
+expect replies ""

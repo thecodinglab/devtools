@@ -1,0 +1,7 @@
+# shrinking the rows with the cursor at the bottom keeps the bottom lines
+size 10 5
+write "1\r\n2\r\n3\r\n4\r\n5"
+resize 10 3
+expect row 0 "3"
+expect row 2 "5"
+expect cursor 1 2

@@ -1,0 +1,6 @@
+# backspace moves left, REP repeats the last character
+size 20 4
+write "abc\b\bX"
+expect row 0 "aXc"
+write "\r\nz\x1b[4b"
+expect row 1 "zzzzz"

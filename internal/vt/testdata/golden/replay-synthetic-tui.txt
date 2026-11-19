@@ -1,0 +1,674 @@
+@ 0 pause alt=false
+size 100x30 cursor 10,0 visible
+󰮟  work ➜|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+styles
+0 0 2 p8
+0 3 4 bold p6
+0 8 1 p2
+@ 1 pause alt=false
+size 100x30 cursor 0,29 visible
+line 11 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 12 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 13 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 14 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 15 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 16 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 17 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 18 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 19 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 20 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 21 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 22 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 23 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 24 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 25 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 26 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 27 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 28 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 29 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 30 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 31 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 32 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 33 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 34 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 35 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 36 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 37 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 38 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 39 of a long listing that wraps at narrow widths, with é and 字 in it|
+|
+styles
+0 0 74 p3
+1 0 74 p4
+2 0 74 p5
+3 0 74 p6
+4 0 74 p7
+5 0 74 p0
+6 0 74 p1
+7 0 74 p2
+8 0 74 p3
+9 0 74 p4
+10 0 74 p5
+11 0 74 p6
+12 0 74 p7
+13 0 74 p0
+14 0 74 p1
+15 0 74 p2
+16 0 74 p3
+17 0 74 p4
+18 0 74 p5
+19 0 74 p6
+20 0 74 p7
+21 0 74 p0
+22 0 74 p1
+23 0 74 p2
+24 0 74 p3
+25 0 74 p4
+26 0 74 p5
+27 0 74 p6
+28 0 74 p7
+@ 2 pause alt=true
+size 100x30 cursor 3,4 hidden
+ synthetic tui  step 0  100x30|
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐|
+│ item 0.3  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.4  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.5  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.6  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│ item 0.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+styles
+0 0 100 reverse
+2 2 26 #3c00c8
+3 2 26 #5000c8
+4 2 26 #6400c8
+5 2 26 #7800c8
+6 2 26 #8c00c8
+7 2 26 #a000c8
+8 2 26 #b400c8
+9 2 27 #c800c8
+10 2 27 #dc00c8
+29 0 100 p15 on p4
+@ 3 pause alt=true
+size 100x30 cursor 0,0 visible
+ synthetic tui  step 0  100x30|
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐|
+│ item 0.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│ item 0.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+  scrolled bold|
+  scrolled bold|
+  scrolled bold|
+  scrolled bold|
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+styles
+0 0 100 reverse
+2 2 26 #8c00c8
+3 2 26 #a000c8
+4 2 26 #b400c8
+5 2 27 #c800c8
+6 2 27 #dc00c8
+24 11 4 bold
+25 11 4 bold
+26 11 4 bold
+27 11 4 bold
+29 0 100 p15 on p4
+@ 4 resize 120x40 alt=true
+size 120x40 cursor 0,0 visible
+ synthetic tui  step 0  100x30|
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐|
+│ item 0.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 0.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│ item 0.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+  scrolled bold|
+  scrolled bold|
+  scrolled bold|
+  scrolled bold|
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+styles
+0 0 100 reverse
+2 2 26 #8c00c8
+3 2 26 #a000c8
+4 2 26 #b400c8
+5 2 27 #c800c8
+6 2 27 #dc00c8
+24 11 4 bold
+25 11 4 bold
+26 11 4 bold
+27 11 4 bold
+29 0 100 p15 on p4
+@ 5 pause alt=true
+size 120x40 cursor 3,4 visible
+ synthetic tui  step 1  120x40|
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+│ item 1.3  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.4  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.5  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.6  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                           │|
+│ item 1.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                          │|
+│ item 1.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                          │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+│                                                                                                                      │|
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+styles
+0 0 120 reverse
+2 2 26 #3c28c8
+3 2 26 #5028c8
+4 2 26 #6428c8
+5 2 26 #7828c8
+6 2 26 #8c28c8
+7 2 26 #a028c8
+8 2 26 #b428c8
+9 2 27 #c828c8
+10 2 27 #dc28c8
+39 0 120 p15 on p4
+@ 6 resize 60x20 alt=true
+size 60x20 cursor 0,0 visible
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+└───────────────────────────────────────────────────────────|
+ NORMAL  ▸ status row|
+styles
+19 0 60 p15 on p4
+@ 7 pause alt=true
+size 60x20 cursor 3,4 visible
+ synthetic tui  step 2  60x20|
+┌──────────────────────────────────────────────────────────┐|
+│ item 2.3  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.4  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.5  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.6  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                              │|
+│ item 2.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                              │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+└──────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+styles
+0 0 60 reverse
+2 2 26 #3c50c8
+3 2 26 #5050c8
+4 2 26 #6450c8
+5 2 26 #7850c8
+6 2 26 #8c50c8
+7 2 26 #a050c8
+8 2 26 #b450c8
+9 2 27 #c850c8
+10 2 27 #dc50c8
+19 0 60 p15 on p4
+@ 8 resize 132x43 alt=true
+size 132x43 cursor 3,4 visible
+ synthetic tui  step 2  60x20|
+┌──────────────────────────────────────────────────────────┐|
+│ item 2.3  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.4  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.5  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.6  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                               │|
+│ item 2.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                              │|
+│ item 2.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                              │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+│                                                          │|
+└──────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+styles
+0 0 60 reverse
+2 2 26 #3c50c8
+3 2 26 #5050c8
+4 2 26 #6450c8
+5 2 26 #7850c8
+6 2 26 #8c50c8
+7 2 26 #a050c8
+8 2 26 #b450c8
+9 2 27 #c850c8
+10 2 27 #dc50c8
+19 0 60 p15 on p4
+@ 9 pause alt=true
+size 132x43 cursor 3,4 visible
+ synthetic tui  step 3  132x43|
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+│ item 3.3  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.4  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.5  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.6  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                       │|
+│ item 3.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                      │|
+│ item 3.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                                                      │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+│                                                                                                                                  │|
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+styles
+0 0 132 reverse
+2 2 26 #3c78c8
+3 2 26 #5078c8
+4 2 26 #6478c8
+5 2 26 #7878c8
+6 2 26 #8c78c8
+7 2 26 #a078c8
+8 2 26 #b478c8
+9 2 27 #c878c8
+10 2 27 #dc78c8
+42 0 132 p15 on p4
+@ 10 resize 100x30 alt=true
+size 100x30 cursor 0,0 visible
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+│|
+└───────────────────────────────────────────────────────────────────────────────────────────────────|
+ NORMAL  ▸ status row|
+styles
+29 0 100 p15 on p4
+@ 11 pause alt=true
+size 100x30 cursor 3,4 visible
+ synthetic tui  step 4  100x30|
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐|
+│ item 4.3  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.4  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.5  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.6  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.7  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.8  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.9  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                       │|
+│ item 4.10  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│ item 4.11  ● ○ ◆ ✓  中文 👨‍👩‍👧                                                                      │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+│                                                                                                  │|
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘|
+ NORMAL  ▸ status row|
+styles
+0 0 100 reverse
+2 2 26 #3ca0c8
+3 2 26 #50a0c8
+4 2 26 #64a0c8
+5 2 26 #78a0c8
+6 2 26 #8ca0c8
+7 2 26 #a0a0c8
+8 2 26 #b4a0c8
+9 2 27 #c8a0c8
+10 2 27 #dca0c8
+29 0 100 p15 on p4
+@ 12 pause alt=false
+size 100x30 cursor 0,29 visible
+line 12 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 13 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 14 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 15 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 16 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 17 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 18 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 19 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 20 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 21 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 22 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 23 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 24 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 25 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 26 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 27 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 28 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 29 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 30 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 31 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 32 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 33 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 34 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 35 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 36 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 37 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 38 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 39 of a long listing that wraps at narrow widths, with é and 字 in it|
+󰮟  work ➜ tui|
+|
+styles
+0 0 74 p4
+1 0 74 p5
+2 0 74 p6
+3 0 74 p7
+4 0 74 p0
+5 0 74 p1
+6 0 74 p2
+7 0 74 p3
+8 0 74 p4
+9 0 74 p5
+10 0 74 p6
+11 0 74 p7
+12 0 74 p0
+13 0 74 p1
+14 0 74 p2
+15 0 74 p3
+16 0 74 p4
+17 0 74 p5
+18 0 74 p6
+19 0 74 p7
+20 0 74 p0
+21 0 74 p1
+22 0 74 p2
+23 0 74 p3
+24 0 74 p4
+25 0 74 p5
+26 0 74 p6
+27 0 74 p7
+28 0 2 p8
+28 3 4 bold p6
+28 8 1 p2
+@ 13 end alt=false
+size 100x30 cursor 10,29 visible
+line 13 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 14 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 15 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 16 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 17 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 18 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 19 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 20 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 21 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 22 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 23 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 24 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 25 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 26 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 27 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 28 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 29 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 30 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 31 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 32 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 33 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 34 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 35 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 36 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 37 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 38 of a long listing that wraps at narrow widths, with é and 字 in it|
+line 39 of a long listing that wraps at narrow widths, with é and 字 in it|
+󰮟  work ➜ tui|
+done|
+󰮟  work ➜|
+styles
+0 0 74 p5
+1 0 74 p6
+2 0 74 p7
+3 0 74 p0
+4 0 74 p1
+5 0 74 p2
+6 0 74 p3
+7 0 74 p4
+8 0 74 p5
+9 0 74 p6
+10 0 74 p7
+11 0 74 p0
+12 0 74 p1
+13 0 74 p2
+14 0 74 p3
+15 0 74 p4
+16 0 74 p5
+17 0 74 p6
+18 0 74 p7
+19 0 74 p0
+20 0 74 p1
+21 0 74 p2
+22 0 74 p3
+23 0 74 p4
+24 0 74 p5
+25 0 74 p6
+26 0 74 p7
+27 0 2 p8
+27 3 4 bold p6
+27 8 1 p2
+29 0 2 p8
+29 3 4 bold p6
+29 8 1 p2

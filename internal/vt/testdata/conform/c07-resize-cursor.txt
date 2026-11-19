@@ -1,0 +1,6 @@
+# the cursor moves with its text through a reflow
+size 10 4
+write "0123456789abc"
+expect cursor 3 1
+resize 20 4
+expect cursor 13 0

@@ -1,0 +1,7 @@
+# DECTCEM hides and shows the cursor
+size 10 3
+expect cursor 0 0 visible
+write "\x1b[?25l"
+expect cursor 0 0 hidden
+write "\x1b[?25h"
+expect cursor 0 0 visible

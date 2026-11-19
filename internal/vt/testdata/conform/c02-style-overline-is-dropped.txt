@@ -1,0 +1,4 @@
+# overline has no attribute in the grammar; the text stays
+size 20 3
+write "\x1b[53mover\x1b[55m\x1b[1mbold"
+expect styled 0 "over\x1b[0;1mbold"

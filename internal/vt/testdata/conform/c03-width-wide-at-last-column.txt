@@ -1,0 +1,6 @@
+# a wide character that does not fit at the last column moves to the next row
+size 5 3
+write "abcd漢"
+expect styled 0 "abcd"
+expect styled 1 "漢"
+expect cursor 2 1

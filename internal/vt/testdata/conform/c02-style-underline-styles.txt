@@ -1,0 +1,4 @@
+# single, double, curly, dotted and dashed underlines; 21 is double
+size 40 3
+write "\x1b[4:1ma\x1b[4:2mb\x1b[4:3mc\x1b[4:4md\x1b[4:5me\x1b[21mf\x1b[4:0mg"
+expect styled 0 "\x1b[0;4ma\x1b[0;4:2mb\x1b[0;4:3mc\x1b[0;4:4md\x1b[0;4:5me\x1b[0;4:2mf\x1b[0mg"

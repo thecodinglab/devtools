@@ -1,0 +1,4 @@
+# an underline colour is written with an underline only
+size 40 3
+write "\x1b[58;5;208;4ma\x1b[24mb\x1b[4:3;58;2;255;0;0mc\x1b[59md"
+expect styled 0 "\x1b[0;4;58;5;208ma\x1b[0mb\x1b[0;4:3;58;2;255;0;0mc\x1b[0;4:3md"

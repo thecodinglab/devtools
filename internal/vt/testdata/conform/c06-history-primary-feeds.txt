@@ -1,0 +1,7 @@
+# lines scrolled off the primary screen come back when the screen grows
+size 10 3
+write "1\r\n2\r\n3\r\n4\r\n5"
+expect row 0 "3"
+resize 10 5
+expect row 0 "1"
+expect row 4 "5"

@@ -1,0 +1,10 @@
+# a line keeps its number while more output scrolls it into the history
+size 10 3
+write "one\r\ntwo\r\n"
+expect range 0 0
+expect line 1 "two"
+write "3\r\n4\r\n5\r\n6\r\n"
+expect range 0 4
+expect line 1 "two"
+expect line 4 "5"
+expect line 5 "6"

@@ -1,0 +1,5 @@
+# a full reset returns to the primary screen
+size 20 5
+write "p\x1b[?1049ha\x1bc"
+expect alt false
+expect row 0 ""

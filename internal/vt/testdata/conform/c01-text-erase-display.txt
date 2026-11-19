@@ -1,0 +1,11 @@
+# ED 0 and 1 erase below and above the cursor, ED 2 everything
+size 10 4
+write "aaaa\r\nbbbb\r\ncccc\r\ndddd\x1b[2;3H\x1b[J"
+expect row 0 "aaaa"
+expect row 1 "bb"
+expect row 2 ""
+write "\x1b[1;2H\x1b[1J"
+expect row 0 "  aa"
+write "\x1b[2J"
+expect row 0 ""
+expect cursor 1 0

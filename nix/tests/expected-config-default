@@ -1,0 +1,7 @@
+machine macbook
+machine macmini connect
+color muted #55585f #a6a8b0
+color raised #e3e4e8 #30323a
+color selection #d6dde9 #3a4150
+color strong #111214 #e6e7eb
+color warning #b04a00 #ec8a3f

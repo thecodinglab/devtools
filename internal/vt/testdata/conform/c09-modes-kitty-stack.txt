@@ -1,0 +1,14 @@
+# kitty flags push, set and pop
+size 80 24
+write "\x1b[>1u"
+expect keys kitty=1
+write "\x1b[>3u"
+expect keys kitty=3
+write "\x1b[=1;2u"
+expect keys kitty=3
+write "\x1b[=4;1u"
+expect keys kitty=4
+write "\x1b[<u"
+expect keys kitty=1
+write "\x1b[<u"
+expect keys none

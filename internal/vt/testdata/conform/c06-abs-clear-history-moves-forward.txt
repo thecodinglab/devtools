@@ -1,0 +1,11 @@
+# erasing the history is a loss too: the screen it leaves gets numbers above every old one
+size 10 3
+write "a\r\nb\r\nc\r\nd\r\ne"
+write "\x1b[3J"
+expect range 5 5
+expect line 5 "c"
+expect line 7 "e"
+write "\r\nf"
+expect range 5 6
+expect line 5 "c"
+expect line 8 "f"

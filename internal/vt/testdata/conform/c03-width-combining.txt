@@ -1,0 +1,5 @@
+# combining marks join their base cell
+size 20 3
+write "éạ̈x"
+expect styled 0 "éạ̈x"
+expect cursor 3 0

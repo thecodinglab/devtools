@@ -1,0 +1,4 @@
+# the OSC 7501 query is answered by the library
+size 80 24
+write "\x1b]7501;?\x07"
+expect replies "\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x07"

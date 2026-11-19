@@ -1,0 +1,8 @@
+# the first line is number 0, and base counts the lines that left the screen
+size 10 3
+expect range 0 0
+write "a\r\nb\r\nc\r\nd\r\ne"
+expect range 0 2
+expect line 0 "a"
+expect line 2 "c"
+expect line 4 "e"

@@ -1,0 +1,6 @@
+# tab stops every eight columns, HTS sets one, TBC clears them
+size 40 4
+write "a\tb\tc"
+expect row 0 "a       b       c"
+write "\r\n\x1b[3g\x1b[5G\x1bH\r\tx\tY"
+expect row 1 "    x                                  Y"

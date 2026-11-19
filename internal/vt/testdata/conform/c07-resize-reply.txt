@@ -1,0 +1,6 @@
+# a reply produced inside Resize is returned by Replies
+size 80 24
+write "\x1b[?2048h"
+expect replies ""
+resize 100 30
+expect replies "\x1b[48;30;100;600;1000t"

@@ -1,0 +1,7 @@
+# a long line wraps again when the screen narrows; a hard line break stays
+size 20 6
+write "0123456789abcdef\r\nxy"
+resize 8 6
+expect row 0 "01234567"
+expect row 1 "89abcdef"
+expect row 2 "xy"

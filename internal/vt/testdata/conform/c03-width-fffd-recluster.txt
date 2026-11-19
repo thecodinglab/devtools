@@ -1,0 +1,4 @@
+# two cells that would join when parsed: the second becomes U+FFFD, the grid stays aligned
+size 10 3
+write "\x1b[1;3H\U0001F3FD\x1b[1;1H\U0001F44D"
+expect styled 0 "\U0001F44D� "

@@ -1,0 +1,4 @@
+# two regional indicators in separate cells would form a flag: the second is replaced
+size 10 3
+write "\x1b[1;3H\U0001F1EA\x1b[1;1H\U0001F1E9"
+expect styled 0 "\U0001F1E9� "

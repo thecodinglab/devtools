@@ -1,0 +1,4 @@
+# a full reset ends synchronized output
+size 80 24
+write "\x1b[?2026hx\x1bc"
+expect sync false

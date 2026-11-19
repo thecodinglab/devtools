@@ -1,0 +1,4 @@
+# 256-colour indices; the first sixteen take their short form
+size 40 3
+write "\x1b[38;5;196ma\x1b[48;5;17mb\x1b[38;5;1;48;5;9mc\x1b[38:5:255md"
+expect styled 0 "\x1b[0;38;5;196ma\x1b[0;38;5;196;48;5;17mb\x1b[0;31;101mc\x1b[0;38;5;255;101md"

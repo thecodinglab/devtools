@@ -1,0 +1,5 @@
+# CJK characters occupy two cells
+size 20 3
+write "漢字abc"
+expect styled 0 "漢字abc"
+expect cursor 7 0

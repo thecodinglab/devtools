@@ -1,0 +1,6 @@
+# a ZWJ sequence, a skin tone, a flag and VS16 are one wide cluster each, with mode 2027
+# provisional (E9): these widths are the engine's with mode 2027, which E9 found equal to x/ansi's in 35 of 35 cases; the outer terminal's half of E9 (ghostty with the user's font) is pending [GO]
+size 30 3
+write "\U0001F468‍\U0001F469‍\U0001F467|\U0001F44D\U0001F3FD|\U0001F1E9\U0001F1EA|❤️|"
+expect styled 0 "\U0001F468‍\U0001F469‍\U0001F467|\U0001F44D\U0001F3FD|\U0001F1E9\U0001F1EA|❤️|"
+expect cursor 12 0

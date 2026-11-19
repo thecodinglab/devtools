@@ -1,0 +1,8 @@
+# OSC 10 and 11 answer the colours given by SetColors, with the query's terminator
+size 80 24
+colors #c0caf5 #1a1b26 dark
+write "\x1b]10;?\x1b\\\x1b]11;?\x07"
+expect replies "\x1b]10;rgb:c0c0/caca/f5f5\x1b\\\x1b]11;rgb:1a1a/1b1b/2626\x07"
+colors #ffffff #000000
+write "\x1b]10;?\x07"
+expect replies "\x1b]10;rgb:ffff/ffff/ffff\x07"

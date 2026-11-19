@@ -1,0 +1,5 @@
+# an OSC 52 read gets no answer at all and reaches no callback
+size 80 24
+write "\x1b]52;c;?\x07\x1b]52;p;?\x1b\\"
+expect replies ""
+expect clipboard ""
