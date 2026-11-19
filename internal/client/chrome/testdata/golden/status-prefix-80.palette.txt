@@ -1,7 +1,7 @@
 size 80x1 cursor 0,0 hidden
  prefix                   1 zsh  2 claude ◆  3 nvim       ◆ 1  ✓ 1  ● 2   14:32|
 styles
-0 0 23 bold reverse
+0 0 8 bold reverse
 0 26 5 p8
 0 33 8 bold p4
 0 42 1 p3

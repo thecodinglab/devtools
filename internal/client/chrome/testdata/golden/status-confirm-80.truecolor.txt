@@ -1,7 +1,7 @@
 size 80x1 cursor 0,0 hidden
  Close this pane? nvim is still running.   ⏎ close pane   esc cancel|
 styles
-0 43 1 #a6a8b0
+0 43 1 bold #e6e7eb
 0 45 10 p8
-0 58 3 #a6a8b0
+0 58 3 bold #e6e7eb
 0 62 6 p8

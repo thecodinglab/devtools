@@ -245,11 +245,20 @@ func TestStatusRowShowsARemoteSessionAsAChip(t *testing.T) {
 	for _, w := range []int{80, 40, 20} {
 		statusGolden(t, fmt.Sprintf("status-remote-%d", w), statusRemote(), w)
 	}
-	// The chip starts at column 0 and takes the raised ground in the
-	// truecolor tier, the brackets in the palette tier.
+	// The chip starts at column 0, in the elsewhere hue and bold in both
+	// tiers, on the raised ground only in the truecolor tier.
 	tc, pal := statusScreens(t, statusLook(), statusRemote(), 80, true)
-	if !strings.HasPrefix(tc.Row(0), " macmini  notes-main") || !strings.HasPrefix(pal.Row(0), "[macmini] notes-main") {
+	if !strings.HasPrefix(tc.Row(0), " macmini  notes-main") || !strings.HasPrefix(pal.Row(0), " macmini  notes-main") {
 		t.Errorf("chip: %q and %q", tc.Row(0), pal.Row(0))
+	}
+	for tier, sc := range map[string]golden.Screen{"truecolor": tc, "palette": pal} {
+		c := drawn(sc)[1]
+		if c.Style.Fg != (screen.Color{Kind: 1, V: 5}) || c.Style.Attrs&screen.Bold == 0 {
+			t.Errorf("%s: the chip's name is drawn %+v, want bold in palette colour 5", tier, c.Style)
+		}
+		if raised := c.Style.Bg.Kind != 0; raised != (tier == "truecolor") {
+			t.Errorf("%s: the chip's ground is %+v", tier, c.Style.Bg)
+		}
 	}
 }
 
@@ -285,11 +294,18 @@ func TestPrefixBlockKeepsTabsInPlace(t *testing.T) {
 				for block < len(pre) && pre[block].Style.Attrs&screen.Reverse != 0 {
 					block++
 				}
+				// the block is the word; the rest of the address is blank
 				address := addressWidth(withTheme(t, tc.s), 80)
-				if block != max(address, 8) {
-					t.Errorf("%s %s: the block is %d cells, the address %d", tc.id, tier, block, address)
+				if block != 8 {
+					t.Errorf("%s %s: the block is %d cells, want 8", tc.id, tier, block)
 				}
-				for x := block; x < 80; x++ {
+				for x := block; x < address; x++ {
+					if pre[x].S != " " || pre[x].Style != (screen.Style{}) {
+						t.Errorf("%s %s: cell %d of the address is %+v with the prefix, want blank", tc.id, tier, x, pre[x])
+						break
+					}
+				}
+				for x := max(block, address); x < 80; x++ {
 					if normal[x] != pre[x] {
 						t.Errorf("%s %s: cell %d is %+v with the prefix, %+v without", tc.id, tier, x, pre[x], normal[x])
 						break
@@ -704,4 +720,20 @@ func TestStatusDrawsOneRow(t *testing.T) {
 		t.Errorf("status row = %q", got)
 	}
 	l.Status(screen.New(0, 0), withTheme(t, statusStandard())) // no panic
+}
+
+// A switch to a session of this machine names the machine like any other
+// word: the elsewhere hue is for another machine only.
+func TestSwitchingToThisMachineIsNotElsewhere(t *testing.T) {
+	s := statusStandard()
+	s.Mode, s.Target = "switching", Target{Machine: thisMachine(s), Session: "notes-main"}
+	_, pal := statusScreens(t, statusLook(), s, 80, true)
+	if !strings.Contains(pal.Row(0), thisMachine(s)+" notes-main") {
+		t.Fatalf("the switching row is %q", pal.Row(0))
+	}
+	for _, c := range drawn(pal) {
+		if c.Style.Fg == (screen.Color{Kind: 1, V: 5}) {
+			t.Fatalf("a cell of the switching row to this machine is in the elsewhere hue: %+v", c)
+		}
+	}
 }

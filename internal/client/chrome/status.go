@@ -205,10 +205,13 @@ func addressRow(s State, p plan, width int) ([]piece, int) {
 		end = b.x
 	}
 	if s.Mode == "prefix" {
-		w := max(end, ui.Width(" "+ui.ModePrefix+" "))
+		// The block is the word and its padding; the rest of the address
+		// stays blank, so the tabs keep their place without a bar of
+		// reverse video across the row.
+		block := " " + ui.ModePrefix + " "
 		b = &rowLine{}
-		b.add(padCells(" "+ui.ModePrefix, w), blockFace)
-		end = w
+		b.add(block, blockFace)
+		end = max(end, ui.Width(block))
 	}
 	b.x = rowMargin
 	if end > 0 {
@@ -505,19 +508,24 @@ func switchingRow(s State, width int) ([]piece, int) {
 		th := s.Theme
 		right := rightLine(s, r.plan)
 		b := ownBlock(ui.ModeSwitching)
-		var words []string
+		ink := roleFace(th, ui.RoleInk)
 		if r.to {
-			words = append(words, ui.SwitchingTo)
+			b.add(ui.SwitchingTo+" ", ink)
 		}
+		// another machine is named in the elsewhere hue, as its chip is
 		if r.machine && s.Target.Machine != "" {
-			words = append(words, s.Target.Machine)
+			f := roleFace(th, ui.RoleInk)
+			if s.Target.Machine != thisMachine(s) {
+				f = withBold(roleFace(th, ui.RoleElsewhere))
+			}
+			b.add(s.Target.Machine, f)
+			b.add(" ", ink)
 		}
 		session := switchingSession(s)
 		if r.session >= 0 {
 			session = th.CutEnd(session, r.session)
 		}
-		words = append(words, session)
-		b.add(strings.Join(words, " "), roleFace(th, ui.RoleInk))
+		b.add(session, ink)
 		return append(b.pieces, right.shifted(width-rowMargin-right.x)...), needOf(b.x, right.x)
 	}
 	r := cutRow("switching", s, fullRow(reduce(normal, width)), width, func(r modeRow) int {
@@ -650,11 +658,11 @@ func (h hint) width() int {
 	return ui.Width(h.key) + 1 + ui.Width(h.label)
 }
 
-// drawHint draws "{key} {label}", the key in muted, the label in comment
-// and cut at the end to label cells unless label is -1. The key is never
-// cut.
+// drawHint draws "{key} {label}": the key in bold strong ink, as the hub's
+// footer draws it, and the label in comment, cut at the end to label cells
+// unless label is -1. The key is never cut.
 func drawHint(b *rowLine, th ui.Theme, h hint, label int) {
-	b.key(h.key, roleFace(th, ui.RoleMuted))
+	b.key(h.key, withBold(roleFace(th, ui.RoleStrong)))
 	text := h.label
 	if label >= 0 {
 		text = th.CutEnd(text, label)

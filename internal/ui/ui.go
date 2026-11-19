@@ -4,10 +4,12 @@
 //
 // The colours are terminal palette indices, not values, so they follow the
 // terminal's own palette and with it a light/dark switch. The palette is
-// quiet: names in the ink, context in the comment grey, a raised ground under
-// the selected row. Blue only ever marks where you are, orange an agent that
-// waits for you, red an error. A clean worktree says nothing at all, and
-// every state is spelled out in words, so none of it rests on colour alone.
+// quiet: names in the ink, context in the comment grey, no ground of its own
+// unless a colour token asks for one, so a translucent terminal stays
+// translucent. Four hues, one meaning each: blue marks where you are,
+// purple another machine, orange an agent that waits for you, red an error.
+// A clean worktree says nothing at all, and every state is spelled out in
+// words or shapes, so none of it rests on colour alone.
 package ui
 
 import (

@@ -182,15 +182,17 @@ func bridgeProcs(t *testing.T, m *Machine) []int {
 // hereRow reports whether the hub marks the row of name in the section of
 // machine as the one the hub was opened from.
 func hereRow(rows []string, machine, name string) bool {
-	chip := glyph(ui.GlyphChipOpen) + machine + glyph(ui.GlyphChipClose)
 	in := false
 	for _, r := range rows[:max(0, len(rows)-1)] {
-		trim := strings.TrimLeft(r, " ")
-		if strings.HasPrefix(trim, glyph(ui.GlyphChipOpen)) {
-			in = strings.HasPrefix(trim, chip)
+		if isHeading(r, "") {
+			in = isHeading(r, machine)
 			continue
 		}
-		if in && strings.HasPrefix(trim, glyph(ui.GlyphHere)) && strings.Contains(trim, name) {
+		// the row you are in has the here mark, or, while the cursor is on
+		// it, the selection bar in the accent: the hub opens on it
+		trim := strings.TrimLeft(r, " ")
+		mark := strings.HasPrefix(trim, glyph(ui.GlyphHere)) || strings.HasPrefix(trim, glyph(ui.GlyphSelected))
+		if in && mark && strings.Contains(trim, name) {
 			return true
 		}
 	}
@@ -354,7 +356,7 @@ func TestP2AgentsLandsOnThePaneOfAnotherMachine(t *testing.T) {
 	f.x.Key("prefix+a")
 	waitUntil(t, f.x, 15*time.Second, "the agent of the macmini is selected", func(rows []string) bool {
 		for _, r := range rows {
-			if strings.Contains(r, glyph(ui.GlyphRight)) && strings.Contains(r, "macmini") && strings.Contains(r, label("beta")) {
+			if strings.HasPrefix(strings.TrimLeft(r, " "), glyph(ui.GlyphSelected)) && strings.Contains(r, "macmini") && strings.Contains(r, label("beta")) {
 				return true
 			}
 		}

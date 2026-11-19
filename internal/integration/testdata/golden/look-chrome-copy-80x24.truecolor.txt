@@ -30,9 +30,9 @@ styles
 2 0 80 on #3a4150
 3 0 80 on #3a4150
 23 0 6 bold reverse
-23 52 1 #a6a8b0
+23 52 1 bold #e6e7eb
 23 54 6 p8
-23 63 1 #a6a8b0
+23 63 1 bold #e6e7eb
 23 65 4 p8
-23 72 1 #a6a8b0
+23 72 1 bold #e6e7eb
 23 74 5 p8

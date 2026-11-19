@@ -2,4 +2,5 @@ size 80x1 cursor 0,0 hidden
  switching   to macmini notes-main…                       ◆ 1  ✓ 1  ● 2   14:32|
 styles
 0 0 11 bold reverse
+0 16 7 bold p5
 0 58 3 p3

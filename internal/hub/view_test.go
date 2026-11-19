@@ -254,7 +254,7 @@ func TestHubLoadingSaysNothingBefore150ms(t *testing.T) {
 		)
 	}
 	before := plainRows(open(ui.Theme{}), 80, 23)
-	if strings.TrimSpace(before[2]) != "" || !strings.HasPrefix(before[4], " [macmini]  connecting…") || !strings.HasPrefix(before[6], " [macbook]") {
+	if strings.TrimSpace(before[2]) != "" || !strings.HasPrefix(before[4], "  macmini   connecting…") || !strings.HasPrefix(before[6], "  macbook ") {
 		t.Fatalf("before 150 ms:\n%s", strings.Join(before, "\n"))
 	}
 	look(t, "hub-loading-80x24", func(th ui.Theme) golden.Screen {
@@ -399,7 +399,8 @@ func TestHubFooterStates(t *testing.T) {
 			look(t, c.id, func(th ui.Theme) golden.Screen {
 				m := exampleHub(th, every, ModeAll, concat(localEvents(), miniEvents(true))...)
 				c.set(t, m)
-				return rowsOf(screenOf(m, 80, 23), 23-c.rows, c.rows)
+				// the footer stands above the closing rule, the hub's last row
+				return rowsOf(screenOf(m, 80, 23), 22-c.rows, c.rows)
 			})
 		})
 	}
@@ -456,7 +457,7 @@ func TestHubAtTwentyByFive(t *testing.T) {
 		t.Fatalf("row 0 = %q, want the input", rows[0])
 	}
 	// the name is cut at the end; the state stays (5a.6.7)
-	if !strings.Contains(strings.Join(rows[1:4], "\n"), "▎▸  m…   ◆ needs you") {
+	if !strings.Contains(strings.Join(rows[1:4], "\n"), "▌   m…   ◆ needs you") {
 		t.Fatalf("the selected row is not in sight:\n%s", strings.Join(rows, "\n"))
 	}
 	if !strings.Contains(rows[4], "esc close") {
@@ -543,7 +544,7 @@ func TestTheHubColumnIsCentredAndAHundredWide(t *testing.T) {
 			}
 		}
 		// the ground of the selected row runs across the column
-		sel := rowOf(t, s, "▎   main")
+		sel := rowOf(t, s, "▌   main")
 		covered := 0
 		for _, r := range runsOf(t, s) {
 			if r.row == sel && strings.Contains(r.style, "on #30323a") {
@@ -563,7 +564,7 @@ func TestSelectedRowFillsTheMeasure(t *testing.T) {
 	for _, w := range []int{40, 80, 100} {
 		m := exampleHub(viewTruecolor(t), every, ModeAll, allEvents()...)
 		s := screenOf(m, w, 23)
-		sel := rowOf(t, s, "▎   main")
+		sel := rowOf(t, s, "▌   main")
 		cells := make([]bool, w)
 		for _, r := range runsOf(t, s) {
 			if r.row == sel && strings.Contains(r.style, "on #30323a") {
@@ -577,19 +578,19 @@ func TestSelectedRowFillsTheMeasure(t *testing.T) {
 				t.Fatalf("%d: cell %d of the selected row has no ground", w, x)
 			}
 		}
-		// the name is bold strong, the title muted instead of comment
+		// the name of the row you are in is bold in the accent
 		for _, r := range runsOf(t, s) {
-			if r.row == sel && r.col == 4 && !strings.HasPrefix(r.style, "bold #e6e7eb on #30323a") {
+			if r.row == sel && r.col == 4 && !strings.HasPrefix(r.style, "bold p4 on #30323a") {
 				t.Fatalf("%d: the name is drawn %q", w, r.style)
 			}
 		}
 	}
 }
 
-func TestSelectedRowInThePaletteTierHasThePointerAndNoGround(t *testing.T) {
+func TestSelectedRowInThePaletteTierHasTheBarAndNoGround(t *testing.T) {
 	m := exampleHub(ui.Theme{}, every, ModeAll, allEvents()...)
 	s := screenOf(m, 80, 23)
-	sel := rowOf(t, s, "▎▸  main")
+	sel := rowOf(t, s, "▌   main")
 	for _, r := range runsOf(t, s) {
 		if r.row != sel {
 			continue
@@ -597,8 +598,8 @@ func TestSelectedRowInThePaletteTierHasThePointerAndNoGround(t *testing.T) {
 		if strings.Contains(r.style, " on ") || strings.HasPrefix(r.style, "on ") || strings.Contains(r.style, "reverse") {
 			t.Fatalf("the selected row has a ground: %+v", r)
 		}
-		if r.col == 4 && r.style != "bold" {
-			t.Fatalf("the name of the selected row is %q, want bold", r.style)
+		if r.col == 4 && r.style != "bold p4" {
+			t.Fatalf("the name of the selected row you are in is %q, want bold in the accent", r.style)
 		}
 	}
 	// the marks keep their colours
@@ -677,8 +678,8 @@ func TestRowsKeepTheirPlaceWhileGitArrives(t *testing.T) {
 	names := func(rows []string) []string {
 		out := make([]string, len(rows))
 		for i, r := range rows {
-			if f := strings.Fields(strings.TrimLeft(r, "▎▸ ")); len(f) > 0 {
-				out[i] = f[0] + fmt.Sprintf("@%d", ui.Width(r)-ui.Width(strings.TrimLeft(r, "▎▸ ")))
+			if f := strings.Fields(strings.TrimLeft(r, "▎▌ ")); len(f) > 0 {
+				out[i] = f[0] + fmt.Sprintf("@%d", ui.Width(r)-ui.Width(strings.TrimLeft(r, "▎▌ ")))
 			}
 		}
 		return out
@@ -708,10 +709,10 @@ func TestHeadingOfAFailedMachineStaysUnderAFilter(t *testing.T) {
 		m.Update(esc)
 		typeInto(m, query)
 		view := strings.Join(plainRows(m, 80, 23), "\n")
-		if !strings.Contains(view, "[macbook]  ✗ ssh could not log in. Run ssh macbook once in a shell.") {
+		if !strings.Contains(view, "\n  macbook   ✗ ssh could not log in. Run ssh macbook once in a shell.") {
 			t.Fatalf("%s: the heading of the failed machine is gone:\n%s", query, view)
 		}
-		if query == "zzzz" && strings.Contains(view, "[macmini]") {
+		if query == "zzzz" && strings.Contains(view, "\n  macmini ") {
 			t.Fatalf("%s: the heading of an online machine without a match stayed:\n%s", query, view)
 		}
 	}
@@ -740,6 +741,30 @@ func TestStaleRowsAreItalicAndComment(t *testing.T) {
 		}
 		if len(seen) != 4 {
 			t.Fatalf("tier %d: styled stale rows %v, want the four rows of macmini:\n%s", i, seen, s.Runs())
+		}
+	}
+}
+
+// A hub drawn at another height than the last WindowSizeMsg said keeps the
+// selected row in sight: the list's height follows the height drawn, with
+// or without the closing rule.
+func TestSelectedRowStaysInSightAtAnyDrawnHeight(t *testing.T) {
+	var items []Item
+	for i := range 30 {
+		items = append(items, worktree("devtools", fmt.Sprintf("feature-%02d", i)))
+	}
+	for _, sizes := range [][2]int{{15, 16}, {16, 15}, {12, 30}, {30, 12}} {
+		m := exampleHub(ui.Theme{}, Features{}, ModeAll, on("", items...))
+		m.Update(tea.WindowSizeMsg{Width: 80, Height: sizes[0]})
+		for range 40 {
+			m.Update(down)
+		}
+		rows := plainRows(m, 80, sizes[1])
+		if len(rows) != sizes[1] {
+			t.Fatalf("%v: %d rows", sizes, len(rows))
+		}
+		if !strings.Contains(strings.Join(rows, "\n"), "▌   feature-29") {
+			t.Errorf("sized %d, drawn %d: the selected row is not in sight:\n%s", sizes[0], sizes[1], strings.Join(rows, "\n"))
 		}
 	}
 }

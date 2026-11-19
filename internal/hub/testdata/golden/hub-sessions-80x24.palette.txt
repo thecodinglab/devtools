@@ -1,49 +1,56 @@
 size 80x23 cursor 4,0 visible
   › Switch to an open session                            all  sessions  agents|
-|
+  ────────────────────────────────────────────────────────────────────────────|
   devtools|
-▎▸  main            3 changed    ↑2   ◆ needs you   Fix the hub footer|
+▌   main            3 changed    ↑2   ◆ needs you   Fix the hub footer|
     replace-herdr                     ● working     Plan part 4|
     fix-footer      1 changed           open|
   systems|
     main            12 changed   ↓1   ○ idle|
 |
- [macmini]|
+  macmini ────────────────────────────────────────────────────────────────────|
   devtools|
     main                              ✓ done        Review PR 212|
   blog|
     main                              ● working     Draft the post|
 |
- [macbook]  not reachable. Opening the hub again retries.|
-|
+  macbook   not reachable. Opening the hub again retries. ────────────────────|
 |
 |
 |
 |
 |
   ⏎ switch   ⌃N new feature   tab agents   esc close|
+  ────────────────────────────────────────────────────────────────────────────|
 styles
 0 4 25 p8
 0 57 3 p8
 0 62 8 bold p4
 0 72 6 p8
+1 2 76 p8
 2 2 8 bold
 3 0 1 p4
-3 1 1 bold
-3 4 4 bold
+3 4 4 bold p4
 3 38 11 p3
 3 52 18 p8
 4 52 11 p8
 5 40 4 p8
 6 2 7 bold
 7 38 6 p8
-9 1 9 bold
+9 1 9 bold p5
+9 10 68 p8
 10 2 8 bold
 11 52 13 p8
 12 2 4 bold
 13 52 14 p8
-15 1 9 bold
-22 4 6 p8
-22 16 11 p8
-22 34 6 p8
-22 47 5 p8
+15 1 9 bold p5
+15 58 20 p8
+21 2 1 bold
+21 4 6 p8
+21 13 2 bold
+21 16 11 p8
+21 30 3 bold
+21 34 6 p8
+21 43 3 bold
+21 47 5 p8
+22 2 76 p8

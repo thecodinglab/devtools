@@ -550,12 +550,12 @@ func TestAThemeMessageRedrawsWithTheNewTheme(t *testing.T) {
 	m := newHub(t, ModelOptions{Features: every, Theme: utf8, Here: session.Target{Dir: "/dev/devtools/main"}})
 	feed(m, on("", worktree("devtools", "main")))
 	before := screenText(m)
-	if !strings.Contains(before, "› ") || !strings.Contains(before, "▎") || !strings.Contains(before, "⏎ switch") {
+	if !strings.Contains(before, "› ") || !strings.Contains(before, "▌") || !strings.Contains(before, "⏎ switch") {
 		t.Fatalf("view in the UTF-8 set:\n%s", before)
 	}
 	m.Update(ui.ThemeMsg{Theme: ascii})
 	after := screenText(m)
-	if strings.Contains(after, "›") || !strings.Contains(after, "  > ") || !strings.Contains(after, "enter switch") || !strings.Contains(after, "|") {
+	if strings.Contains(after, "›") || !strings.Contains(after, "  > ") || !strings.Contains(after, "enter switch") || !strings.Contains(after, ">   main") {
 		t.Fatalf("view after the theme changed to the ASCII set:\n%s", after)
 	}
 }

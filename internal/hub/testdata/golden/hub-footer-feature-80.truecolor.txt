@@ -1,13 +1,13 @@
 size 80x1 cursor 0,0 hidden
   ⏎ switch   ⌃N new feature   ⌃G merge into main   tab sessions   esc close|
 styles
-0 2 1 #a6a8b0
+0 2 1 bold #e6e7eb
 0 4 6 p8
-0 13 2 #a6a8b0
+0 13 2 bold #e6e7eb
 0 16 11 p8
-0 30 2 #a6a8b0
+0 30 2 bold #e6e7eb
 0 33 15 p8
-0 51 3 #a6a8b0
+0 51 3 bold #e6e7eb
 0 55 8 p8
-0 66 3 #a6a8b0
+0 66 3 bold #e6e7eb
 0 70 5 p8

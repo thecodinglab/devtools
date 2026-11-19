@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	roleNames   = [...]string{"ink", "strong", "muted", "comment", "accent", "warning", "error"}
+	roleNames   = [...]string{"ink", "strong", "muted", "comment", "accent", "warning", "error", "elsewhere"}
 	groundNames = [...]string{"none", "raised", "selection"}
 )
 
-const lastRole, lastGround = RoleError, GroundSelection
+const lastRole, lastGround = RoleElsewhere, GroundSelection
 
 // systemsTokens are the five color lines the systems config generates from
 // palette.nix (4.6, 5a.7.1): the same values as the truecolor column of
@@ -162,7 +162,7 @@ func TestARoleWithoutATokenStaysPalette(t *testing.T) {
 	if f := only.Face(RoleStrong, GroundNone); f.Fg.Kind != PaintRGB {
 		t.Fatalf("strong with its token is %+v, want RGB", f)
 	}
-	for _, r := range []Role{RoleInk, RoleMuted, RoleComment, RoleAccent, RoleWarning, RoleError} {
+	for _, r := range []Role{RoleInk, RoleMuted, RoleComment, RoleAccent, RoleWarning, RoleError, RoleElsewhere} {
 		for g := GroundNone; g <= lastGround; g++ {
 			if got, want := only.Face(r, g), palette.Face(r, g); got != want {
 				t.Errorf("%s on %s with only the strong token is %+v, want the palette tier's %+v", roleNames[r], groundNames[g], got, want)
@@ -172,11 +172,11 @@ func TestARoleWithoutATokenStaysPalette(t *testing.T) {
 	if only.HasGround(GroundRaised) || only.HasGround(GroundSelection) {
 		t.Error("without the raised and selection tokens a ground is drawn; the palette-tier treatment of 5a.7.1 is due")
 	}
-	if text, _ := only.Chip("macmini"); text != "[macmini]" {
-		t.Errorf("the chip without the raised token is %q, want the palette-tier chip", text)
+	if text, f := only.Chip("macmini"); text != " macmini " || f.Bg.Kind != PaintDefault {
+		t.Errorf("the chip without the raised token is %q %+v, want it without a ground", text, f)
 	}
 	all := mustTheme(t, ThemeOptions{Tokens: systemsTokens, Dark: true, Known: true, Colors: 1 << 24, UTF8: true})
-	for _, r := range []Role{RoleInk, RoleComment, RoleAccent, RoleError} {
+	for _, r := range []Role{RoleInk, RoleComment, RoleAccent, RoleError, RoleElsewhere} {
 		if got, want := all.Face(r, GroundNone), palette.Face(r, GroundNone); got != want {
 			t.Errorf("%s with every token is %+v, want the palette colour %+v in both tiers", roleNames[r], got, want)
 		}
@@ -208,8 +208,8 @@ func TestChipHasTheSameWidthInBothTiers(t *testing.T) {
 		}
 	}
 	text, f := truecolor.Chip("macmini")
-	if text != " macmini " || f.Bg != (Paint{Kind: PaintRGB, V: 0x30323a}) || f.Fg != (Paint{Kind: PaintRGB, V: 0xe6e7eb}) || !f.Bold {
-		t.Errorf("the truecolor chip is %q %+v, want \" macmini \" in bold strong on the raised ground", text, f)
+	if text != " macmini " || f.Bg != (Paint{Kind: PaintRGB, V: 0x30323a}) || f.Fg != (Paint{Kind: PaintPalette, V: 5}) || !f.Bold {
+		t.Errorf("the truecolor chip is %q %+v, want \" macmini \" in bold elsewhere on the raised ground", text, f)
 	}
 }
 
@@ -227,7 +227,9 @@ func TestChipHasTheSameWidthInBothTiers(t *testing.T) {
 // pairs as the real colour. The table has no row for palette 3, which the
 // palette tier draws warning with: it stands in with the warning token's
 // value (provisional: palette 3 of palette.nix is not measured, 5a.13 says
-// the palette colours are the theme's business).
+// the palette colours are the theme's business). Palette 5, which the
+// elsewhere role is drawn with in both tiers, is base0E of palette.nix
+// itself: purple, 7.65 and 6.49 on the two grounds.
 type appearance struct {
 	name              string
 	dark              bool
@@ -240,22 +242,22 @@ type appearance struct {
 var appearances = []appearance{
 	{
 		name: "dark", dark: true, bg: 0x1b1c20, ink: 0xc8c4c7,
-		palette: map[uint32]uint32{8: 0x908c8f, 4: 0xb0adb0, 1: 0x8d8c90, 3: 0xec8a3f},
+		palette: map[uint32]uint32{8: 0x908c8f, 4: 0xb0adb0, 1: 0x8d8c90, 3: 0xec8a3f, 5: 0xb9a2ec},
 		raised:  0x30323a, selection: 0x3a4150,
 		table: map[Role][3]float64{
 			RoleInk: {9.87, 7.41, 5.93}, RoleStrong: {13.78, 10.34, 8.28}, RoleMuted: {7.17, 5.39, 4.31},
 			RoleComment: {5.13, 3.85, 3.09}, RoleAccent: {7.66, 5.75, 4.61}, RoleWarning: {6.71, 5.04, 4.03},
-			RoleError: {5.10, 3.83, 3.06},
+			RoleError: {5.10, 3.83, 3.06}, RoleElsewhere: {7.65, 5.75, 4.60},
 		},
 	},
 	{
 		name: "light", dark: false, bg: 0xfefafd, ink: 0x3e3a3e,
-		palette: map[uint32]uint32{8: 0x6e6a6c, 4: 0x605c60, 1: 0x686569, 3: 0xb04a00},
+		palette: map[uint32]uint32{8: 0x6e6a6c, 4: 0x605c60, 1: 0x686569, 3: 0xb04a00, 5: 0x6a45b5},
 		raised:  0xe3e4e8, selection: 0xd6dde9,
 		table: map[Role][3]float64{
 			RoleInk: {10.80, 8.79, 8.18}, RoleStrong: {18.12, 14.75, 13.73}, RoleMuted: {6.89, 5.61, 5.22},
 			RoleComment: {5.15, 4.20, 3.90}, RoleAccent: {6.35, 5.17, 4.81}, RoleWarning: {5.31, 4.32, 4.02},
-			RoleError: {5.56, 4.52, 4.21},
+			RoleError: {5.56, 4.52, 4.21}, RoleElsewhere: {6.49, 5.28, 4.91},
 		},
 	},
 }

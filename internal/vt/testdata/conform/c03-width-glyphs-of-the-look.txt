@@ -1,5 +1,5 @@
 # the glyphs of the look are one cell each (E9)
 # provisional (E9): these widths are the engine's with mode 2027, which E9 found equal to x/ansi's in 35 of 35 cases; the outer terminal's half of E9 (ghostty with the user's font) is pending [GO]
 size 40 3
-write "▎│─◂▸▴▾◆✓●○✗…›⏎⌃↑↓·"
-expect cursor 19 0
+write "▎│─◂▸▴▾◆✓●○✗…›⏎⌃↑↓·▌"
+expect cursor 20 0

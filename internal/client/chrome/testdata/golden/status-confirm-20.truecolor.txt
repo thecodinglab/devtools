@@ -1,5 +1,5 @@
 size 20x1 cursor 0,0 hidden
  Close nv…?  ⏎  esc|
 styles
-0 13 1 #a6a8b0
-0 16 3 #a6a8b0
+0 13 1 bold #e6e7eb
+0 16 3 bold #e6e7eb

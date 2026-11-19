@@ -1,8 +1,7 @@
 size 80x23 cursor 14,0 visible
   › fix-status                                           all  sessions  agents|
-|
-  + New feature fix-status in devtools, from main|
-|
+  ────────────────────────────────────────────────────────────────────────────|
+▌ + New feature fix-status in devtools, from main|
 |
 |
 |
@@ -22,18 +21,22 @@ size 80x23 cursor 14,0 visible
 |
 |
   ⏎ create   tab sessions   esc clear|
+  ────────────────────────────────────────────────────────────────────────────|
 styles
 0 57 3 bold p4
 0 62 8 p8
 0 72 6 p8
-2 0 2 on #30323a
+1 2 76 p8
+2 0 1 bold #e6e7eb on #30323a
+2 1 1 on #30323a
 2 2 14 #a6a8b0 on #30323a
 2 16 10 bold #e6e7eb on #30323a
 2 26 23 #a6a8b0 on #30323a
 2 49 31 on #30323a
-22 2 1 #a6a8b0
-22 4 6 p8
-22 13 3 #a6a8b0
-22 17 8 p8
-22 28 3 #a6a8b0
-22 32 5 p8
+21 2 1 bold #e6e7eb
+21 4 6 p8
+21 13 3 bold #e6e7eb
+21 17 8 p8
+21 28 3 bold #e6e7eb
+21 32 5 p8
+22 2 76 p8

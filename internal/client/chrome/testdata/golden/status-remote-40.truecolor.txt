@@ -1,7 +1,7 @@
 size 40x1 cursor 0,0 hidden
  macmini    2 claude ●  +1          ◆ 1|
 styles
-0 0 9 bold #e6e7eb on #30323a
+0 0 9 bold p5 on #30323a
 0 12 8 bold p4
 0 21 1 #a6a8b0
 0 24 2 p8

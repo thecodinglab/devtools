@@ -1,12 +1,11 @@
 size 80x23 cursor 4,0 visible
   › Switch to a worktree, or name a new feature          all  sessions  agents|
-|
+  ────────────────────────────────────────────────────────────────────────────|
   Loading worktrees…|
 |
-  macmini   connecting…|
+  macmini   connecting… ──────────────────────────────────────────────────────|
 |
-  macbook   connecting…|
-|
+  macbook   connecting… ──────────────────────────────────────────────────────|
 |
 |
 |
@@ -22,3 +21,4 @@ size 80x23 cursor 4,0 visible
 |
 |
   esc close|
+  ────────────────────────────────────────────────────────────────────────────|

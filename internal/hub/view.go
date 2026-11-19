@@ -19,12 +19,21 @@ import (
 
 // The spacing units of 5a.6.1, in cells.
 const (
-	gutter   = 2 // left of every row; column 0 holds the here mark, column 1 the pointer
+	gutter   = 2 // left of every row; column 0 holds the selection bar or the here mark
 	indent   = 2 // a worktree under its project
 	gap      = 3 // between columns, between hints
 	sep      = 2 // between a heading's chip and its phrase; between scopes
 	margin   = 2 // right of the scope bar and of every row
 	minTitle = 8 // a title is drawn only when at least this many cells are free
+
+	// closingRows is the least height at which the hub closes itself off
+	// from the status row with a rule; a shorter hub keeps the row for its
+	// list.
+	closingRows = 16
+
+	// minRule is the least length of the rule after a machine heading; a
+	// shorter one is left out.
+	minRule = 3
 )
 
 // thisMachine is this machine's name, for the machine column of the agents
@@ -45,6 +54,7 @@ type seg struct {
 type line struct {
 	segs     []seg
 	selected bool
+	rule     bool // a spacer drawn as a rule: it gives way like an empty row
 }
 
 func spaces(n int) seg { return seg{text: strings.Repeat(" ", max(0, n))} }
@@ -129,13 +139,14 @@ func (m *Model) render(l line, w int) string {
 	return b.String()
 }
 
-// lines is the hub in a column of w cells and h rows (5a.6.7): the input
-// and an empty row, the list, the create row, the row of the question and
-// the footer. In a window too short for everything the list gives way
-// first, then the empty rows; the input, the create row and the footer
-// stay.
+// lines is the hub in a column of w cells and h rows: the input and the
+// rule that is its edge, the list, the create row, the row of the question,
+// the footer and the rule that closes the hub off from the status row
+// below it. In a window too short for everything the list gives way first,
+// then the empty row above the footer, the closing rule and the input's
+// rule; the input, the create row and the footer stay.
 func (m *Model) lines(w, h int) []line {
-	top := []line{m.inputLine(w), {}}
+	top := []line{m.inputLine(w), m.ruleLine(w)}
 	list := m.listLines(w, h)
 	var create []line
 	if m.create != nil {
@@ -144,28 +155,40 @@ func (m *Model) lines(w, h int) []line {
 		}
 		create = append(create, m.createLine(w))
 	}
-	bottom := m.footerLines(w)
+	footer := m.footerLines(w) // the question row, or an empty row; the hints
+	bottom := append([]line(nil), footer...)
+	if h >= closingRows {
+		bottom = append(bottom, m.ruleLine(w))
+	}
 	if room := h - len(top) - len(create) - len(bottom); len(list) > max(0, room) {
 		list = list[:max(0, room)]
 		if len(list) == 0 && len(create) > 1 {
 			create = create[1:]
 		}
 	}
-	lines := append(append(top, list...), create...)
-	for len(lines)+len(bottom) < h {
-		lines = append(lines, line{})
+	body := append(append(top, list...), create...)
+	// still too tall: the spacers give way in their order
+	over := func() bool { return len(body)+len(bottom) > h }
+	if over() && len(footer[0].segs) == 0 {
+		bottom = bottom[1:]
 	}
-	lines = append(lines, bottom...)
-	// still too tall: the empty row above the footer goes, then the one
-	// under the input, then whatever is above the footer
-	if len(lines) > h && len(bottom[0].segs) == 0 {
-		lines = append(lines[:len(lines)-2], lines[len(lines)-1])
+	if over() && len(bottom) > 0 && bottom[len(bottom)-1].rule {
+		bottom = bottom[:len(bottom)-1]
 	}
-	if len(lines) > h && len(lines) > 1 && len(lines[1].segs) == 0 {
-		lines = append(lines[:1], lines[2:]...)
+	if over() && len(body) > 1 && (len(body[1].segs) == 0 || body[1].rule) {
+		body = append(body[:1], body[2:]...)
 	}
+	for !over() && len(body)+len(bottom) < h {
+		body = append(body, line{})
+	}
+	lines := append(body, bottom...)
 	if len(lines) > h {
-		lines = append(lines[:max(0, h-1)], lines[len(lines)-1])
+		// the footer's hints are the last thing to go
+		hints := lines[len(lines)-1]
+		if lines[len(lines)-1].rule {
+			hints = lines[len(lines)-2]
+		}
+		lines = append(lines[:max(0, h-1)], hints)
 		lines = lines[len(lines)-h:]
 	}
 	return lines
@@ -249,11 +272,14 @@ func (m *Model) inputLine(w int) line {
 	return line{segs: segs}
 }
 
-// fixedLines is everything around the list: the input and its empty row,
-// the empty row above the footer and the footer, and the create row and its
-// empty row.
-func (m *Model) fixedLines() int {
+// fixedLines is everything around the list: the input and its rule, the
+// empty row above the footer, the footer and the closing rule, and the
+// create row and its empty row, for a hub of h rows.
+func (m *Model) fixedLines(h int) int {
 	n := 4
+	if h >= closingRows {
+		n++
+	}
 	if m.create != nil {
 		n += 2
 	}
@@ -261,7 +287,7 @@ func (m *Model) fixedLines() int {
 }
 
 func (m *Model) listHeight(h int) int {
-	return max(1, h-m.fixedLines())
+	return max(1, h-m.fixedLines(h))
 }
 
 // dkind is what one line of the list shows.
@@ -600,18 +626,37 @@ func staleSegs(segs []seg) {
 	}
 }
 
-// gutterSegs is the gutter of a row: the here mark in column 0, and in the
-// palette tier the pointer of the selected row in column 1 (5a.7.1).
+// gutterSegs is the gutter of a row: column 0 holds the selection bar on
+// the selected row, in the accent when that is the row you are in, or the
+// here mark on the row you are in; column 1 stays blank. Thickness says
+// selected, the accent says here, so the two never stand side by side.
 func (m *Model) gutterSegs(here, selected bool) []seg {
 	mark := spaces(1)
-	if here {
+	switch {
+	case selected && here:
+		mark = seg{text: m.theme.Glyph(ui.GlyphSelected), role: ui.RoleAccent}
+	case selected:
+		mark = seg{text: m.theme.Glyph(ui.GlyphSelected), role: ui.RoleStrong}
+	case here:
 		mark = seg{text: m.theme.Glyph(ui.GlyphHere), role: ui.RoleAccent}
 	}
-	pointer := spaces(1)
-	if selected && !m.theme.HasGround(ui.GroundRaised) {
-		pointer = seg{text: m.theme.Glyph(ui.GlyphRight), role: ui.RoleStrong}
+	return []seg{mark, spaces(1)}
+}
+
+// nameBase is the run a row's name is drawn in: the accent on the row you
+// are in, bold on the selected row.
+func nameBase(here, selected bool) seg {
+	s := seg{role: ui.RoleInk}
+	if here {
+		s.role = ui.RoleAccent
 	}
-	return []seg{mark, pointer}
+	if selected {
+		s.bold = true
+		if !here {
+			s.role = ui.RoleStrong
+		}
+	}
+	return s
 }
 
 // machineHeading is the heading of another machine: its chip at column 1,
@@ -623,9 +668,10 @@ func (m *Model) machineHeading(mc *machine, w int) line {
 
 // headingLine is a machine heading: the chip of another machine at column 1,
 // or this machine's name in comment where the chip's name would start, then
-// sep and the phrase: muted, or ink after the failed mark in error. The
-// name is cut at the end and keeps its first letter; the phrase is cut at
-// the end.
+// sep and the phrase: muted, or ink after the failed mark in error. A rule
+// in comment runs from there to the margin, so a machine's section is told
+// from a project's heading by its shape as well as its hue. The name is cut
+// at the end and keeps its first letter; the phrase is cut at the end.
 func (m *Model) headingLine(name string, this bool, phrase string, failed bool, w int) line {
 	name = m.theme.CutEnd(name, max(1, w-gutter-1-margin))
 	var segs []seg
@@ -633,22 +679,25 @@ func (m *Model) headingLine(name string, this bool, phrase string, failed bool, 
 		segs = []seg{spaces(gutter), {text: name, role: ui.RoleComment}, spaces(1)}
 	} else {
 		chip, _ := m.theme.Chip(name)
-		segs = []seg{spaces(1), {text: chip, role: ui.RoleStrong, ground: ui.GroundRaised, bold: true}}
+		segs = []seg{spaces(1), {text: chip, role: ui.RoleElsewhere, ground: ui.GroundRaised, bold: true}}
 	}
-	if phrase == "" {
-		return line{segs: segs}
-	}
-	segs = append(segs, spaces(sep))
-	room := w - margin - segsWidth(segs)
-	if failed {
-		mark := m.theme.Glyph(ui.GlyphFailed)
-		segs = append(segs, seg{text: mark, role: ui.RoleError}, spaces(1))
-		room -= ui.Width(mark) + 1
-		if room > 0 {
-			segs = append(segs, seg{text: m.theme.CutEnd(phrase, room)})
+	if phrase != "" {
+		segs = append(segs, spaces(sep))
+		room := w - margin - segsWidth(segs)
+		if failed {
+			mark := m.theme.Glyph(ui.GlyphFailed)
+			segs = append(segs, seg{text: mark, role: ui.RoleError}, spaces(1))
+			room -= ui.Width(mark) + 1
+			if room > 0 {
+				segs = append(segs, seg{text: m.theme.CutEnd(phrase, room)})
+			}
+		} else if room > 0 {
+			segs = append(segs, seg{text: m.theme.CutEnd(phrase, room), role: ui.RoleMuted})
 		}
-	} else if room > 0 {
-		segs = append(segs, seg{text: m.theme.CutEnd(phrase, room), role: ui.RoleMuted})
+		segs = append(segs, spaces(1))
+	}
+	if n := w - margin - segsWidth(segs); n >= minRule {
+		segs = append(segs, seg{text: strings.Repeat(m.theme.Glyph(ui.GlyphDividerH), n), role: ui.RoleComment})
 	}
 	return line{segs: segs}
 }
@@ -657,10 +706,7 @@ func (m *Model) headingLine(name string, this bool, phrase string, failed bool, 
 // state, title (5a.6.7).
 func (m *Model) itemSegs(r row, item Item, cols columns, selected bool, w int) []seg {
 	segs := m.gutterSegs(r.item == m.here, selected)
-	base := seg{role: ui.RoleInk}
-	if selected {
-		base = seg{role: ui.RoleStrong, bold: true}
-	}
+	base := nameBase(r.item == m.here, selected)
 	var name []seg
 	if item.grouped() {
 		name = append(name, spaces(indent))
@@ -706,24 +752,21 @@ func (m *Model) titleSegs(segs []seg, open bool, title string, w int) []seg {
 
 // agentSegs is a row of the agents scope: state, machine, session, tab and
 // kind, title (5a.6.7). The machine column is this machine's name in
-// comment and other machines' names in ink; it is there only when machine
+// comment and other machines' names in the elsewhere hue; it is there only when machine
 // sections exist and another machine is configured.
 func (m *Model) agentSegs(r row, item Item, cols columns, selected bool, w int) []seg {
 	segs := m.gutterSegs(r.item == m.hereAgent, selected)
 	state, role := m.stateCell(item)
 	segs = append(segs, cellSegs(state, cols.agentState, role)...)
 	if cols.showMachine {
-		role := ui.RoleInk
+		role := ui.RoleElsewhere
 		if item.Machine == "" {
 			role = ui.RoleComment
 		}
 		segs = append(segs, spaces(gap))
 		segs = append(segs, cellSegs(m.theme.CutEnd(m.machineName(item), cols.machine), cols.machine, role)...)
 	}
-	base := seg{role: ui.RoleInk}
-	if selected {
-		base = seg{role: ui.RoleStrong, bold: true}
-	}
+	base := nameBase(r.item == m.hereAgent, selected)
 	label := m.theme.CutMiddle(item.Session, cols.session)
 	hits := r.nameHits
 	if label != item.Session {
@@ -847,7 +890,7 @@ type hint struct {
 	leaves     int
 }
 
-// hintLine is the hints, keys in muted and labels in comment, gap apart.
+// hintLine is the hints, keys in bold strong ink and labels in comment, gap apart.
 // When they do not fit, ⌃G leaves first, then ⌃N, then tab, then enter;
 // a key is never cut.
 func (m *Model) hintLine(hints []hint, w int) line {
@@ -857,7 +900,7 @@ func (m *Model) hintLine(hints []hint, w int) line {
 			if i > 0 {
 				segs = append(segs, spaces(gap))
 			}
-			segs = append(segs, seg{text: h.key, role: ui.RoleMuted}, spaces(1), seg{text: h.label, role: ui.RoleComment})
+			segs = append(segs, seg{text: h.key, role: ui.RoleStrong, bold: true}, spaces(1), seg{text: h.label, role: ui.RoleComment})
 		}
 		return segs
 	}
@@ -920,4 +963,15 @@ func cellSegs(text string, width int, r ui.Role) []seg {
 		segs = append(segs, seg{text: trimmed, role: r})
 	}
 	return append(segs, spaces(width-ui.Width(text)))
+}
+
+// ruleLine is the edge of the input field: a rule in comment across the
+// column, between the gutter and the margin. It stands where an empty row
+// would, and gives way like one in a short window.
+func (m *Model) ruleLine(w int) line {
+	n := w - gutter - margin
+	if n <= 0 {
+		return line{}
+	}
+	return line{segs: []seg{spaces(gutter), {text: strings.Repeat(m.theme.Glyph(ui.GlyphDividerH), n), role: ui.RoleComment}}, rule: true}
 }

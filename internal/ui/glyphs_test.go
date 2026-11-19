@@ -10,7 +10,7 @@ var glyphNames = [glyphCount]string{
 	"here", "divider vertical", "divider horizontal", "pointer left", "pointer right",
 	"pointer up", "pointer down", "blocked", "done", "working", "idle", "bell", "failed",
 	"ellipsis", "prompt", "enter", "control", "ahead", "behind", "pad", "create",
-	"chip open", "chip close",
+	"selected",
 }
 
 func TestEveryGlyphIsOneCellWide(t *testing.T) {
@@ -40,29 +40,28 @@ func TestEveryGlyphIsOneCellWide(t *testing.T) {
 // user's font on Linux and on a Mac is pending [GO]. A glyph that fails it
 // is replaced in glyphs.go and here together.
 var e9Record = map[Glyph]rune{
-	GlyphHere:      0x258E,
-	GlyphDividerV:  0x2502,
-	GlyphDividerH:  0x2500,
-	GlyphLeft:      0x25C2,
-	GlyphRight:     0x25B8,
-	GlyphUp:        0x25B4,
-	GlyphDown:      0x25BE,
-	GlyphBlocked:   0x25C6,
-	GlyphDone:      0x2713,
-	GlyphWorking:   0x25CF,
-	GlyphIdle:      0x25CB,
-	GlyphBell:      0x0021,
-	GlyphFailed:    0x2717,
-	GlyphEllipsis:  0x2026,
-	GlyphPrompt:    0x203A,
-	GlyphEnter:     0x23CE,
-	GlyphControl:   0x2303,
-	GlyphAhead:     0x2191,
-	GlyphBehind:    0x2193,
-	GlyphPad:       0x00B7,
-	GlyphCreate:    0x002B,
-	GlyphChipOpen:  0x005B,
-	GlyphChipClose: 0x005D,
+	GlyphHere:     0x258E,
+	GlyphDividerV: 0x2502,
+	GlyphDividerH: 0x2500,
+	GlyphLeft:     0x25C2,
+	GlyphRight:    0x25B8,
+	GlyphUp:       0x25B4,
+	GlyphDown:     0x25BE,
+	GlyphBlocked:  0x25C6,
+	GlyphDone:     0x2713,
+	GlyphWorking:  0x25CF,
+	GlyphIdle:     0x25CB,
+	GlyphBell:     0x0021,
+	GlyphFailed:   0x2717,
+	GlyphEllipsis: 0x2026,
+	GlyphPrompt:   0x203A,
+	GlyphEnter:    0x23CE,
+	GlyphControl:  0x2303,
+	GlyphAhead:    0x2191,
+	GlyphBehind:   0x2193,
+	GlyphPad:      0x00B7,
+	GlyphCreate:   0x002B,
+	GlyphSelected: 0x258C,
 }
 
 func TestTheGlyphTableMatchesTheRecordOfE9(t *testing.T) {
@@ -97,7 +96,7 @@ func codePoints(s string) string {
 // asciiRecord is the ASCII column of the table of 5a.7.2.
 var asciiRecord = [glyphCount]string{
 	"|", "|", "-", "<", ">", "^", "v", "?", "+", "*", "-", "!", "x",
-	"...", ">", "enter", "ctrl+", "^", "v", ".", "+", "[", "]",
+	"...", ">", "enter", "ctrl+", "^", "v", ".", "+", ">",
 }
 
 func TestTheASCIISetIsASCII(t *testing.T) {
@@ -144,7 +143,7 @@ func TestTheZeroThemeIsThePaletteTier(t *testing.T) {
 	if !zero.HasGround(GroundNone) {
 		t.Error("the zero theme has no ground at all; the default ground is always there")
 	}
-	for r := RoleInk; r <= RoleError; r++ {
+	for r := RoleInk; r <= RoleElsewhere; r++ {
 		for g := GroundNone; g <= GroundSelection; g++ {
 			f := zero.Face(r, g)
 			if f.Fg.Kind == PaintRGB || f.Bg.Kind == PaintRGB {
@@ -156,13 +155,14 @@ func TestTheZeroThemeIsThePaletteTier(t *testing.T) {
 		}
 	}
 	want := map[Role]Face{
-		RoleInk:     {},
-		RoleStrong:  {Bold: true},
-		RoleMuted:   {},
-		RoleComment: {Fg: Paint{Kind: PaintPalette, V: 8}},
-		RoleAccent:  {Fg: Paint{Kind: PaintPalette, V: 4}},
-		RoleWarning: {Fg: Paint{Kind: PaintPalette, V: 3}},
-		RoleError:   {Fg: Paint{Kind: PaintPalette, V: 1}},
+		RoleInk:       {},
+		RoleStrong:    {Bold: true},
+		RoleMuted:     {},
+		RoleComment:   {Fg: Paint{Kind: PaintPalette, V: 8}},
+		RoleAccent:    {Fg: Paint{Kind: PaintPalette, V: 4}},
+		RoleWarning:   {Fg: Paint{Kind: PaintPalette, V: 3}},
+		RoleError:     {Fg: Paint{Kind: PaintPalette, V: 1}},
+		RoleElsewhere: {Fg: Paint{Kind: PaintPalette, V: 5}},
 	}
 	for r, f := range want {
 		if got := zero.Face(r, GroundNone); got != f {
@@ -173,8 +173,8 @@ func TestTheZeroThemeIsThePaletteTier(t *testing.T) {
 		t.Errorf("accent on the selection ground is %+v, want reverse video in the default colours", f)
 	}
 	text, f := zero.Chip("macmini")
-	if text != "[macmini]" || !f.Bold || f.Bg.Kind != PaintDefault {
-		t.Errorf("the chip is %q %+v, want [macmini] in bold without a ground", text, f)
+	if text != " macmini " || !f.Bold || f.Fg != (Paint{Kind: PaintPalette, V: 5}) || f.Bg.Kind != PaintDefault {
+		t.Errorf("the chip is %q %+v, want \" macmini \" in bold elsewhere without a ground", text, f)
 	}
 }
 

@@ -2,4 +2,5 @@ size 40x1 cursor 0,0 hidden
  switching   macmini notes-main…    ◆ 1|
 styles
 0 0 11 bold reverse
+0 13 7 bold p5
 0 36 3 #ec8a3f

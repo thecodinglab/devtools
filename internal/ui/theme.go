@@ -10,13 +10,14 @@ package ui
 type Role uint8
 
 const (
-	RoleInk     Role = iota // the text
-	RoleStrong              // names that lead; always bold
-	RoleMuted               // secondary data
-	RoleComment             // context
-	RoleAccent              // here
-	RoleWarning             // wants you
-	RoleError               // failed
+	RoleInk       Role = iota // the text
+	RoleStrong                // names that lead; always bold
+	RoleMuted                 // secondary data
+	RoleComment               // context
+	RoleAccent                // here
+	RoleWarning               // wants you
+	RoleError                 // failed
+	RoleElsewhere             // another machine: where the keys or Enter would go
 )
 
 // Ground is what a cell's background is (5a.7.1).

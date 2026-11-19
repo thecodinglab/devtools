@@ -51,26 +51,28 @@ func NewTheme(o ThemeOptions) (Theme, error) {
 }
 
 // paletteFg is the foreground of each role in the palette tier (5a.7.1).
-// accent, error and comment are palette colours in both tiers.
+// accent, error, comment and elsewhere are palette colours in both tiers.
 var paletteFg = [...]Paint{
-	RoleInk:     {},
-	RoleStrong:  {},
-	RoleMuted:   {},
-	RoleComment: {Kind: PaintPalette, V: 8},
-	RoleAccent:  {Kind: PaintPalette, V: 4},
-	RoleWarning: {Kind: PaintPalette, V: 3},
-	RoleError:   {Kind: PaintPalette, V: 1},
+	RoleInk:       {},
+	RoleStrong:    {},
+	RoleMuted:     {},
+	RoleComment:   {Kind: PaintPalette, V: 8},
+	RoleAccent:    {Kind: PaintPalette, V: 4},
+	RoleWarning:   {Kind: PaintPalette, V: 3},
+	RoleError:     {Kind: PaintPalette, V: 1},
+	RoleElsewhere: {Kind: PaintPalette, V: 5},
 }
 
 // roleToken is the token that can give a role an RGB value, or -1.
 var roleToken = [...]int{
-	RoleInk:     -1,
-	RoleStrong:  tokenStrong,
-	RoleMuted:   tokenMuted,
-	RoleComment: -1,
-	RoleAccent:  -1,
-	RoleWarning: tokenWarning,
-	RoleError:   -1,
+	RoleInk:       -1,
+	RoleStrong:    tokenStrong,
+	RoleMuted:     tokenMuted,
+	RoleComment:   -1,
+	RoleAccent:    -1,
+	RoleWarning:   tokenWarning,
+	RoleError:     -1,
+	RoleElsewhere: -1,
 }
 
 // token is the paint of token i, and whether the theme draws it. Outside
@@ -167,8 +169,8 @@ func paintColor(p Paint) ansi.Color {
 // HasGround reports whether g is drawn as a colour. The default ground
 // always is; the raised and the selection ground only in the truecolor tier
 // and only when their token is set. Where it is false the caller draws the
-// treatment of 5a.7.1 instead (the pointer and a bold name for the selected
-// row, reverse video for the banner and the copy selection).
+// treatment of 5a.7.1 instead (the selection bar and a bold name for the
+// selected row, reverse video for the banner and the copy selection).
 func (t Theme) HasGround(g Ground) bool {
 	switch g {
 	case GroundNone:
@@ -183,13 +185,17 @@ func (t Theme) HasGround(g Ground) bool {
 	return false
 }
 
-// Chip is a machine's name as the status row and the hub headings draw it
-// (5a.7.1): " name " in bold strong ink on the raised ground, or, without
-// that ground, "[name]" in bold, the brackets taking the two padding cells.
-// Both forms are two cells wider than the name.
+// Chip is another machine's name as the status row and the hub headings
+// draw it: " name " in bold, in the elsewhere hue, which nothing else in the
+// product uses. Where the theme has the raised ground the chip stands on
+// it; without it the two padding cells stay blank, so a terminal's own
+// background (and its transparency) shows through. Both forms are two cells
+// wider than the name.
 func (t Theme) Chip(name string) (string, Face) {
-	if t.HasGround(GroundRaised) {
-		return " " + name + " ", t.Face(RoleStrong, GroundRaised)
+	f := t.Face(RoleElsewhere, GroundNone)
+	f.Bold = true
+	if bg, ok := t.token(tokenRaised); ok {
+		f.Bg = bg
 	}
-	return t.Glyph(GlyphChipOpen) + name + t.Glyph(GlyphChipClose), t.Face(RoleStrong, GroundNone)
+	return " " + name + " ", f
 }

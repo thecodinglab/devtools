@@ -49,7 +49,7 @@ styles
 20 0 80 p8
 21 0 80 p8
 22 0 80 p8
-23 0 20 bold reverse
+23 0 8 bold reverse
 23 23 5 bold p4
 23 30 8 p8
 23 63 3 p3

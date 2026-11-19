@@ -1,6 +1,6 @@
 size 20x1 cursor 0,0 hidden
-[macm…]   2 ●   ◆ 1|
+ macm…    2 ●   ◆ 1|
 styles
-0 0 7 bold
+0 0 7 bold p5
 0 10 1 bold p4
 0 16 3 p3

@@ -74,13 +74,12 @@ func (f *fleetOf) dropCold(t *testing.T) {
 // remoteRow reports whether the section of machine has a row: the row
 // under its heading is neither empty nor another heading.
 func remoteRow(rows []string, machine string) bool {
-	chip := glyph(ui.GlyphChipOpen) + machine + glyph(ui.GlyphChipClose)
 	for i := 0; i+1 < len(rows)-1; i++ {
-		if !strings.HasPrefix(strings.TrimLeft(rows[i], " "), chip) {
+		if !isHeading(rows[i], machine) {
 			continue
 		}
 		next := strings.TrimSpace(rows[i+1])
-		return next != "" && !strings.HasPrefix(next, glyph(ui.GlyphChipOpen))
+		return next != "" && !isHeading(rows[i+1], "") && !strings.HasPrefix(next, glyph(ui.GlyphDividerH))
 	}
 	return false
 }
@@ -267,10 +266,9 @@ func fakeScratchDir(t *testing.T, m *Machine) (string, func()) {
 func pickScratch(t *testing.T, x *Term, s scratch) {
 	t.Helper()
 	choose(t, x, scratchLabel, scratchLabel)
-	chip := glyph(ui.GlyphChipOpen) + s.machine + glyph(ui.GlyphChipClose) + " " + scratchLabel
 	x.Key("enter")
 	waitUntil(t, x, 15*time.Second, "the scratch session of "+s.machine, func(rows []string) bool {
-		return !hubOpen(rows) && strings.Contains(statusRow(rows), chip)
+		return !hubOpen(rows) && strings.HasPrefix(statusRow(rows), chipped(s.machine, scratchLabel))
 	})
 }
 
@@ -310,9 +308,8 @@ func pickReal(t *testing.T, x *Term, cfg RealConfig) time.Duration {
 	waitUntil(t, x, 15*time.Second, "a row of "+cfg.Remote+" for "+cfg.Query, func(rows []string) bool { return remoteRow(rows, cfg.Remote) })
 	start := time.Now()
 	x.Key("enter")
-	chip := glyph(ui.GlyphChipOpen) + cfg.Remote + glyph(ui.GlyphChipClose)
 	waitUntil(t, x, 15*time.Second, "the session of "+cfg.Remote, func(rows []string) bool {
-		return !hubOpen(rows) && strings.Contains(statusRow(rows), chip)
+		return !hubOpen(rows) && strings.HasPrefix(statusRow(rows), " "+cfg.Remote+"  ")
 	})
 	return time.Since(start)
 }

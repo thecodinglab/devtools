@@ -132,14 +132,39 @@ func statusRow(rows []string) string {
 
 // shows reports whether the status row names the session of project name
 // on machine ("" for this machine): a session of another machine carries
-// the machine's chip in front of its label (5a.5).
+// the machine's chip, " name ", at the start of the row in front of its
+// label.
 func shows(rows []string, machine, name string) bool {
 	st := statusRow(rows)
-	chip := glyph(ui.GlyphChipOpen) + machine + glyph(ui.GlyphChipClose) + " " + label(name)
 	if machine != "" {
-		return strings.Contains(st, chip)
+		return strings.HasPrefix(st, chipped(machine, label(name)))
 	}
-	return strings.Contains(st, " "+label(name)+" ") && !strings.Contains(st, glyph(ui.GlyphChipClose)+" "+label(name))
+	for _, other := range remoteMachines {
+		if strings.HasPrefix(st, chipped(other, label(name))) {
+			return false
+		}
+	}
+	return strings.Contains(st, " "+label(name)+" ")
+}
+
+// remoteMachines are the machines of the suite that are not this one.
+var remoteMachines = []string{"macmini", "macbook"}
+
+// chipped is the start of a status row that shows the session lbl of
+// another machine: its chip, " machine ", and the label after the
+// separator.
+func chipped(machine, lbl string) string { return " " + machine + "  " + lbl }
+
+// isHeading reports whether a row of the hub heads the section of a machine
+// (machine "" for any): the machine's name, its phrase, and a rule to the
+// margin. The input's rule and the closing rule are rules alone.
+func isHeading(row, machine string) bool {
+	trim := strings.TrimSpace(row)
+	rule := glyph(ui.GlyphDividerH)
+	if trim == "" || strings.HasPrefix(trim, rule) || !strings.HasSuffix(trim, rule) {
+		return false
+	}
+	return machine == "" || trim == machine || strings.HasPrefix(trim, machine+" ")
 }
 
 // showsFull reports whether the screen is a full frame of the session of
@@ -216,15 +241,14 @@ func hubRow(rows []string, text string) bool {
 
 // selected reports whether the selected row of the hub is the one of name.
 func selected(rows []string, name string) bool {
-	return hubRow(rows, glyph(ui.GlyphRight)+name)
+	return hubRow(rows, glyph(ui.GlyphSelected)+" "+name)
 }
 
 // heading returns the row of the hub that heads the section of machine
-// ("[macmini]  ..."), "" when there is none.
+// ("macmini   listing… ───"), "" when there is none.
 func heading(rows []string, machine string) string {
-	chip := glyph(ui.GlyphChipOpen) + machine + glyph(ui.GlyphChipClose)
 	for _, r := range rows[:max(0, len(rows)-1)] {
-		if strings.HasPrefix(strings.TrimLeft(r, " "), chip) {
+		if isHeading(r, machine) {
 			return strings.TrimSpace(r)
 		}
 	}
