@@ -1,0 +1,25 @@
+size 80x24 cursor 0,0 hidden
+ macmini  not reachable. Retrying. Typing is paused.|
+~/notes main|
+$ rg -n "status row" docs/|
+docs/plan.md:12:the status row|
+$|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+ macmini  notes-main   1 zsh  2 claude      macmini retrying   ◆ 1  ● 1   14:32|

@@ -1,0 +1,386 @@
+#!/bin/sh
+# postcheck: the checks PC-1 to PC-13 after the switch (PLAN 9.5, CO7, P3-04).
+#
+# One line per check; exit 0 only if no check failed. It changes nothing of
+# the user's: PC-12 starts and kills a tmux server on its own socket
+# devtools-postcheck with -f /dev/null, through `command tmux`.
+# PC-6 is retired in revision 2 (SY23) and printed as such.
+#
+# PC-10 and PC-13 need a devtools pane and PC-12 a plain terminal, so after
+# CO8 it runs twice: in a devtools pane (DEVTOOLS_PANE set) it runs PC-10
+# and PC-13, outside one PC-12, each with every check that needs neither,
+# and it names the checks it left to the other run.
+#
+#   postcheck              the checks for the place it runs in
+#   postcheck --self-test  every check against fixtures
+set -u
+PROG=${0##*/}
+HERE=$(cd "$(dirname "$0")" && pwd -P) || exit 1
+# shellcheck source=scripts/verify/lib.sh
+. "$HERE/lib.sh"
+USAGE='postcheck [--self-test]'
+
+mode=check
+case ${1-} in
+'') ;;
+--self-test) mode=self-test ;;
+*) usage ;;
+esac
+[ $# -le 1 ] || usage
+
+os=$(verify_os) || exit 1
+uid=$(id -u)
+user=$(id -un)
+pane=
+[ -n "${DEVTOOLS_PANE-}" ] && pane=1
+POSTCHECK_SOCKET=devtools-postcheck
+# The words the two refusals of PC-13 print. Copied, because a shell script
+# cannot read internal/ui: ui.Message("mismatch", "tmux", "devtools") of
+# internal/ui/words.go (5a.14), and the refusal of the function of SY19.
+MISMATCH='DEVTOOLS_MULTIPLEXER is set to tmux, but this terminal is inside devtools.'
+REFUSAL='tmux: refused. This terminal is a devtools pane'
+
+# field <json> <name> prints a number or a string field of one flat object.
+field() {
+	printf '%s' "$1" | tr -d '\n' | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\)\"\{0,1\}[[:space:]]*[,}].*/\1/p"
+}
+
+# launchd_state <label> prints the state launchd reports for the agent, or
+# fails when it is not listed.
+launchd_state() {
+	_out=$(launchctl print "gui/$uid/$1" 2>/dev/null) || return 1
+	printf '%s\n' "$_out" | sed -n 's/^[[:space:]]*state = \(.*\)$/\1/p' | head -n 1
+}
+
+STATUS=
+pc1() {
+	if ! STATUS=$(devtools server status --json 2>&1); then
+		printf '%s\n' "$STATUS" | note_output
+		STATUS=
+		check PC-1 FAIL "devtools server status --json: the server does not answer"
+		return
+	fi
+	note "$STATUS"
+	gen=$(field "$STATUS" gen) sessions=$(field "$STATUS" sessions) clients=$(field "$STATUS" clients)
+	bad=
+	[ "$gen" = 1 ] || bad="gen is ${gen:-missing}, want 1"
+	# sessions is 0 right after the switch (CO7). Once a client has attached
+	# (CO8) or the check runs in a devtools pane, sessions exist and are not
+	# counted.
+	if [ -z "$pane" ] && [ "$clients" = 0 ]; then
+		[ "$sessions" = 0 ] || bad="${bad:+$bad; }sessions is ${sessions:-missing}, want 0"
+	else
+		note "sessions $sessions, clients $clients: run in a devtools pane or with a client attached, so sessions is not checked"
+	fi
+	if [ -z "$bad" ]; then check PC-1 pass "the server answers"; else check PC-1 FAIL "$bad"; fi
+}
+
+pc2() {
+	if [ "$os" = Linux ]; then
+		s=$(systemctl --user is-active "$REAL_UNIT" 2>&1)
+		if [ "$s" = active ]; then check PC-2 pass "$REAL_UNIT is active"; else
+			check PC-2 FAIL "$REAL_UNIT is ${s:-unknown}, want active"
+		fi
+	else
+		s=$(launchd_state "$REAL_LABEL") || s="not listed"
+		if [ "$s" = running ]; then check PC-2 pass "$REAL_LABEL is running"; else
+			check PC-2 FAIL "$REAL_LABEL: state ${s:-unknown}, want running"
+		fi
+	fi
+}
+
+pc3() {
+	sock=$(field "$STATUS" socket)
+	[ -n "$sock" ] || sock=$HOME/.local/state/devtools/server.sock
+	dir=${sock%/*}
+	d=$(file_mode_uid "$dir") || d=missing
+	f=$(file_mode_uid "$sock") || f=missing
+	note "$dir: $d"
+	note "$sock: $f"
+	if [ "$d" = "700 $uid" ] && [ "$f" = "600 $uid" ]; then check PC-3 pass "state directory 0700 and socket 0600, owned by $user"; else
+		check PC-3 FAIL "want 0700 and 0600 owned by uid $uid: $dir is $d, the socket is $f"
+	fi
+}
+
+pc4() {
+	bad=
+	p=$(pgrep -x herdr 2>/dev/null) && [ -n "$p" ] && bad="herdr runs (pid $(printf '%s' "$p" | tr '\n' ' '))"
+	c=$(command -v herdr 2>/dev/null) && bad="${bad:+$bad; }herdr is on the PATH: $c"
+	hook=$HOME/.claude/hooks/herdr-agent-state.sh
+	[ -e "$hook" ] && bad="${bad:+$bad; }$hook exists"
+	if [ -z "$bad" ]; then check PC-4 pass "nothing of herdr is left"; else check PC-4 FAIL "$bad"; fi
+}
+
+pc5() {
+	bad=
+	if [ "$os" = Linux ]; then
+		systemctl --user list-units --all --plain --no-legend 'devtools-serve*' 2>&1 | note_output
+		systemctl --user list-units --all --plain --no-legend 'devtools-serve*' 2>/dev/null |
+			awk '$1 == "devtools-serve.service" { f = 1 } END { exit !f }' && bad="devtools-serve.service is listed"
+		ss -lntu 2>/dev/null | grep -Eq '[:.]47390([^0-9]|$)' && bad="${bad:+$bad; }something listens on 47390"
+	else
+		launchctl print "gui/$uid/org.nix-community.home.devtools-serve" >/dev/null 2>&1 &&
+			bad="org.nix-community.home.devtools-serve is listed"
+		l=$(lsof -nP -i :47390 2>/dev/null) && [ -n "$l" ] && bad="${bad:+$bad; }something listens on 47390"
+	fi
+	if [ -z "$bad" ]; then check PC-5 pass "no old devtools service, nothing on 47390"; else check PC-5 FAIL "$bad"; fi
+}
+
+pc7() {
+	cfg=$HOME/.config/devtools/config
+	bad=
+	link=$(readlink "$cfg" 2>/dev/null) || link=
+	note "$cfg -> ${link:-(not a symlink)}"
+	case $link in "$STORE"/*) ;; *) bad="the config is not a link into $STORE" ;; esac
+	devtools list >/dev/null 2>&1 || bad="${bad:+$bad; }devtools list exits $?"
+	if [ -f "$cfg.local" ]; then
+		out=$(devtools bookmark list 2>&1) || bad="${bad:+$bad; }devtools bookmark list failed"
+		printf '%s\n' "$out" | note_output
+		missing=$(awk '$1 == "bookmark" { print $2 }' "$cfg.local" | while IFS= read -r n; do
+			printf '%s\n' "$out" | awk -v n="$n" '$1 == n { f = 1 } END { exit !f }' || printf '%s ' "$n"
+		done)
+		[ -z "$missing" ] || bad="${bad:+$bad; }bookmarks of config.local not listed: $missing"
+	else
+		note "no config.local: CO4 moved nothing"
+	fi
+	if [ -z "$bad" ]; then check PC-7 pass "the generated config is read"; else check PC-7 FAIL "$bad"; fi
+}
+
+pc8() {
+	if [ "$os" = Linux ]; then
+		if ! text=$(systemctl --user cat "$REAL_UNIT" 2>&1); then
+			check PC-8 FAIL "systemctl --user cat $REAL_UNIT failed"
+			return
+		fi
+		lines=$(printf '%s\n' "$text" | grep -E '^(Environment|ExecStart)=')
+		words=$(printf '%s\n' "$lines" | sed -n 's/^Environment=//p' | tr ' ' '\n' | tr -d '"' | grep -v '^$')
+		names=$(printf '%s\n' "$words" | sed 's/=.*//')
+		passenv=$(printf '%s\n' "$words" | sed -n 's/^DEVTOOLS_PASS_ENV=//p')
+		src="the unit"
+	else
+		file=$HOME/Library/LaunchAgents/$REAL_LABEL.plist
+		if [ ! -f "$file" ]; then
+			check PC-8 FAIL "no $file"
+			return
+		fi
+		lines=$(cat "$file")
+		# the keys of EnvironmentVariables, without the PATH the module adds
+		names=$(awk '/<key>EnvironmentVariables<\/key>/ { f = 1; next }
+			f && /<\/dict>/ { exit }
+			f && /<key>/ { gsub(/.*<key>|<\/key>.*/, ""); print }' "$file" | grep -vx PATH)
+		passenv=$(awk 'p { gsub(/.*<string>|<\/string>.*/, ""); print; exit } /<key>DEVTOOLS_PASS_ENV<\/key>/ { p = 1 }' "$file")
+		src=$file
+	fi
+	printf '%s\n' "$lines" | note_output
+	bad=
+	printf '%s\n' "$lines" | grep -qF "$STORE/" && bad="$src names $STORE"
+	[ -n "$passenv" ] || bad="${bad:+$bad; }no DEVTOOLS_PASS_ENV"
+	for n in $names; do
+		[ "$n" = DEVTOOLS_PASS_ENV ] && continue
+		case ",$passenv," in *",$n,"*) ;; *) bad="${bad:+$bad; }DEVTOOLS_PASS_ENV lacks $n" ;; esac
+	done
+	if [ -z "$bad" ]; then check PC-8 pass "the unit text is stable; DEVTOOLS_PASS_ENV=$passenv"; else check PC-8 FAIL "$bad"; fi
+}
+
+pc9() {
+	ssh -T -o BatchMode=yes -o ConnectTimeout=10 localhost devtools bridge </dev/null >"$WORK/bridge" 2>"$WORK/bridge.err"
+	rc=$?
+	first=$(head -c 64 "$WORK/bridge")
+	note "first bytes: $first"
+	case $first in
+	'devtools-bridge-ready 1'*) check PC-9 pass "the bridge is reachable" ;;
+	*)
+		note_output <"$WORK/bridge.err"
+		if [ "$rc" -eq 255 ]; then check PC-9 skip "ssh to localhost is not set up (X1 covers the bridge from another machine)"; else
+			check PC-9 FAIL "the bridge did not start with devtools-bridge-ready 1 (exit $rc)"
+		fi
+		;;
+	esac
+}
+
+pc10() {
+	if [ -z "$pane" ]; then
+		check PC-10 left "needs a devtools pane: run postcheck in one"
+		return
+	fi
+	out=$(nvim --headless -c 'lua io.write(tostring(vim.env.DEVTOOLS_PANE ~= nil))' -c q </dev/null 2>&1)
+	if [ "$out" = true ]; then check PC-10 pass "neovim has the new branch"; else check PC-10 FAIL "neovim printed: $out"; fi
+}
+
+pc11() {
+	if [ "$os" != Linux ]; then
+		check PC-11 n/a "Linux only"
+		return
+	fi
+	l=$(loginctl show-user "$user" -p Linger 2>&1)
+	if [ "$l" = Linger=yes ]; then check PC-11 pass "the server outlives a logout"; else check PC-11 FAIL "loginctl says ${l:-nothing}, want Linger=yes (SY20)"; fi
+}
+
+pc12() {
+	if [ -n "$pane" ]; then
+		check PC-12 left "needs a plain terminal: run postcheck outside devtools"
+		return
+	fi
+	bad=
+	out=$(command tmux -L "$POSTCHECK_SOCKET" -f /dev/null new-session -d 2>&1) || bad="new-session failed: $out"
+	out=$(command tmux -L "$POSTCHECK_SOCKET" kill-server 2>&1) || bad="${bad:+$bad; }kill-server failed: $out"
+	if [ "$os" = Darwin ]; then
+		s=$(launchd_state "$TMUX_LABEL") || s="not listed"
+		[ "$s" = running ] || bad="${bad:+$bad; }$TMUX_LABEL: state $s, want running (SY23)"
+	fi
+	if [ -z "$bad" ]; then check PC-12 pass "tmux still works"; else check PC-12 FAIL "$bad"; fi
+}
+
+sessions() { command tmux list-sessions -F '#{session_name}' 2>/dev/null; }
+
+pc13() {
+	if [ -z "$pane" ]; then
+		check PC-13 left "needs a devtools pane: run postcheck in one"
+		return
+	fi
+	bad=
+	before=$(sessions)
+	out=$(DEVTOOLS_MULTIPLEXER=tmux devtools sessions </dev/null 2>&1)
+	rc=$?
+	printf '%s\n' "$out" | note_output
+	if [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep -qF "$MISMATCH"; then
+		bad="DEVTOOLS_MULTIPLEXER=tmux devtools sessions: exit $rc, want 1 and the mismatch words"
+	fi
+	out=$(zsh -ic 'tmux new -d' </dev/null 2>&1)
+	rc=$?
+	printf '%s\n' "$out" | note_output
+	if [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep -qF "$REFUSAL"; then
+		bad="${bad:+$bad; }zsh -ic 'tmux new -d': exit $rc, want 1 and the refusal of SY19"
+	fi
+	after=$(sessions)
+	new=$(printf '%s\n' "$after" | while IFS= read -r n; do
+		[ -n "$n" ] && ! printf '%s\n' "$before" | grep -qxF -- "$n" && printf '%s ' "$n"
+	done)
+	[ -z "$new" ] || bad="${bad:+$bad; }new tmux session: $new(close it by hand)"
+	if [ -z "$bad" ]; then check PC-13 pass "a devtools pane cannot be put into tmux"; else check PC-13 FAIL "$bad"; fi
+}
+
+# --- self-test ---------------------------------------------------------------
+
+# shellcheck disable=SC2329 # run by st_end through ST_CLEANUP
+st_stop_tmux() { "$ST_TMUX" -L "$POSTCHECK_SOCKET" kill-server >/dev/null 2>&1; }
+
+self_test() {
+	ST_TMUX=$(command -v tmux) || die "self-test: PC-12 needs tmux on the PATH"
+	st_begin
+	ST_CLEANUP=st_stop_tmux
+	st_fakes devtools systemctl launchctl loginctl pgrep ss lsof ssh nvim zsh tmux
+	H=$ST/home
+	state=$H/.local/state/devtools
+	cfgstore=$ST/store/4444-hm_devtoolsconfig
+	prof=/etc/profiles/per-user/$ST_USER
+	mkdir -p "$state" "$H/.config/devtools" "$H/Library/LaunchAgents" || die "self-test: mkdir failed"
+	chmod 700 "$state" || die "self-test: chmod failed"
+	: >"$state/server.sock" || die "self-test: cannot write the socket file"
+	chmod 600 "$state/server.sock" || die "self-test: chmod failed"
+	printf 'machine macbook\n' >"$cfgstore" || die "self-test: cannot write $cfgstore"
+	ln -s "$cfgstore" "$H/.config/devtools/config" || die "self-test: ln failed"
+	printf 'bookmark notes /tmp\n' >"$H/.config/devtools/config.local"
+	cat >"$H/Library/LaunchAgents/$REAL_LABEL.plist" <<EOF
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DEVTOOLS_PASS_ENV</key>
+		<string>LANG,SHELL,SSH_AUTH_SOCK</string>
+		<key>LANG</key>
+		<string>en_US.UTF-8</string>
+		<key>PATH</key>
+		<string>$prof/bin:/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>SHELL</key>
+		<string>$prof/bin/zsh</string>
+		<key>SSH_AUTH_SOCK</key>
+		<string>$H/.ssh/agent.sock</string>
+	</dict>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$prof/bin/devtools</string>
+		<string>server</string>
+	</array>
+</dict>
+</plist>
+EOF
+	unit="[Service]
+Environment=DEVTOOLS_PASS_ENV=LANG,SHELL
+Environment=LANG=en_US.UTF-8
+Environment=SHELL=$prof/bin/zsh
+ExecStart=$prof/bin/devtools server"
+	fx devtools 'server status --json' "{\"pid\":4242,\"version\":\"1.0.0\",\"gen\":1,\"boot\":\"b1\",\"sessions\":0,\"panes\":0,\"clients\":0,\"socket\":\"$state/server.sock\"}"
+	fx devtools list 'devtools /tmp/dev/devtools'
+	fx devtools 'bookmark list' 'notes	/tmp'
+	fx devtools sessions "$MISMATCH
+Unset it, or detach from devtools first." 1
+	fx systemctl "--user is-active $REAL_UNIT" active
+	fx systemctl '--user list-units --all --plain --no-legend devtools-serve*' 'devtools-server.service loaded active running devtools server'
+	fx systemctl "--user cat $REAL_UNIT" "$unit"
+	fx loginctl "show-user $ST_USER -p Linger" Linger=yes
+	fx launchctl "print gui/$ST_UID/$REAL_LABEL" '	state = running'
+	fx launchctl "print gui/$ST_UID/$TMUX_LABEL" '	state = running'
+	fx launchctl "print gui/$ST_UID/org.nix-community.home.devtools-serve" 'Could not find service' 113
+	fx pgrep '-x herdr' '' 1
+	fx ss -lntu 'tcp LISTEN 0 128 127.0.0.1:22 0.0.0.0:*'
+	fx lsof '-nP -i :47390' '' 1
+	fx ssh '-T -o BatchMode=yes -o ConnectTimeout=10 localhost devtools bridge' 'devtools-bridge-ready 1'
+	fx nvim "--headless -c lua io.write(tostring(vim.env.DEVTOOLS_PANE ~= nil)) -c q" true
+	fx zsh '-ic tmux new -d' "$REFUSAL; a multiplexer inside it would nest." 1
+	fx tmux 'list-sessions -F #{session_name}' main
+
+	run=$HERE/postcheck
+	plain='PC-1 +pass.*PC-2 +pass.*PC-3 +pass.*PC-4 +pass.*PC-5 +pass.*PC-6 +retired.*PC-7 +pass.*PC-8 +pass.*PC-9 +pass.*PC-10 +left.*PC-11 +(pass|n/a).*PC-12 +pass.*PC-13 +left'
+	inpane='PC-1 +pass.*PC-9 +pass.*PC-10 +pass.*PC-11 +(pass|n/a).*PC-12 +left.*PC-13 +pass'
+	inorder() { tr '\n' ' ' <"$ST/out" | grep -Eq "$1" || { say "self-test: FAIL  not every check passed in order" && ST_FAILS=$((ST_FAILS + 1)); }; }
+	for o in Linux Darwin; do
+		st_run pass "$o, plain terminal: every check passes, PC-12 on its own socket" 'left to the run in a devtools pane: PC-10 PC-13' \
+			DEVTOOLS_VERIFY_OS=$o "$ST_SH" "$run"
+		inorder "$plain"
+		if "$ST_TMUX" -L "$POSTCHECK_SOCKET" ls >/dev/null 2>&1; then
+			say "self-test: FAIL  a tmux server is left on $POSTCHECK_SOCKET"
+			ST_FAILS=$((ST_FAILS + 1))
+		fi
+		st_run pass "$o, devtools pane: every check passes" 'left to the run in a plain terminal: PC-12' \
+			DEVTOOLS_VERIFY_OS=$o DEVTOOLS_PANE=p1 "$ST_SH" "$run"
+		inorder "$inpane"
+	done
+	fx systemctl "--user cat $REAL_UNIT" "$unit
+Environment=EDITOR=$ST/store/5555-neovim/bin/nvim"
+	st_fakes herdr
+	fx zsh '-ic tmux new -d' '' 0
+	st_run fail 'Linux, devtools pane: herdr left, a store path in the unit and a missing tmux function fail' \
+		'PC-4 +FAIL.*' DEVTOOLS_VERIFY_OS=Linux DEVTOOLS_PANE=p1 "$ST_SH" "$run"
+	for want in 'PC-8 +FAIL.*names' 'PC-8 +FAIL.*lacks EDITOR' 'PC-13 +FAIL'; do
+		grep -Eq "$want" "$ST/out" || { say "self-test: FAIL  no /$want/" && ST_FAILS=$((ST_FAILS + 1)); }
+	done
+	st_finish
+}
+
+if [ "$mode" = self-test ]; then self_test; fi
+begin_checks
+pc1
+pc2
+pc3
+pc4
+pc5
+say "PC-6   retired in revision 2: the tmux agent of the Macs stays (SY23); PC-12 checks it"
+pc7
+pc8
+pc9
+pc10
+pc11
+pc12
+pc13
+if [ -n "$pane" ]; then
+	say "left to the run in a plain terminal: PC-12"
+else
+	say "left to the run in a devtools pane: PC-10 PC-13"
+fi
+if [ "$FAILED" -eq 0 ]; then
+	say "postcheck: no check failed"
+	exit 0
+fi
+say "postcheck: $FAILED failed"
+exit 1

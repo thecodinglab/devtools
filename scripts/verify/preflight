@@ -1,0 +1,399 @@
+#!/bin/sh
+# preflight: the checks PF-1 to PF-11 before the sitting (PLAN 9.3, P3-04).
+#
+# Read-only; one line per check; exit 0 only if every check passes. Runs
+# from a checkout of devtools at the cutover commit, on each machine.
+#
+#   preflight [--systems DIR] [--commit REV] [--peers A,B]
+#   preflight --record [--systems DIR]   [GO] the one writing form (PF-9)
+#   preflight --self-test                every check against fixtures
+#
+# --systems is the systems checkout (default ~/dev/systems), --commit the
+# published cutover commit (default origin/main of that checkout), --peers
+# the ssh aliases of the other two machines (default: the machine lines of
+# the rehearsal config ~/.cache/devtools-rc/config/devtools/config).
+set -u
+PROG=${0##*/}
+HERE=$(cd "$(dirname "$0")" && pwd -P) || exit 1
+# shellcheck source=scripts/verify/lib.sh
+. "$HERE/lib.sh"
+USAGE='preflight [--systems DIR] [--commit REV] [--peers A,B] [--record] | --self-test'
+
+mode=check SYSTEMS=$HOME/dev/systems COMMIT=origin/main PEERS=
+while [ $# -gt 0 ]; do
+	case $1 in
+	--systems | --commit | --peers)
+		[ $# -ge 2 ] || usage
+		case $1 in
+		--systems) SYSTEMS=$2 ;;
+		--commit) COMMIT=$2 ;;
+		--peers) PEERS=$2 ;;
+		esac
+		shift 2
+		;;
+	--record) mode=record && shift ;;
+	--self-test) mode=self-test && shift ;;
+	*) usage ;;
+	esac
+done
+
+os=$(verify_os) || exit 1
+user=$(id -un)
+
+PREV=$HOME/.local/state/devtools-cutover/previous-system
+SYSTEM_PROFILE=${NIX_STATE_DIR:-/nix/var/nix}/profiles/system
+ZIG_DEFAULT=0.17.1 # the Zig of the locks of 8.2, used when the devtools lock cannot be read
+
+peers() {
+	if [ -n "$PEERS" ]; then
+		printf '%s\n' "$PEERS" | tr ',' '\n' | grep -v '^$'
+	elif [ -f "$RC_CONFIG/devtools/config" ]; then
+		awk '$1 == "machine" { print $2 }' "$RC_CONFIG/devtools/config"
+	fi
+}
+
+pf1() {
+	if ! head=$(git -C "$SYSTEMS" rev-parse HEAD 2>&1); then
+		printf '%s\n' "$head" | note_output
+		check PF-1 FAIL "no systems checkout at $SYSTEMS"
+		return
+	fi
+	if ! pub=$(git -C "$SYSTEMS" rev-parse -q --verify "$COMMIT^{commit}"); then
+		check PF-1 FAIL "$COMMIT is not a commit of $SYSTEMS"
+		return
+	fi
+	note "HEAD $head"
+	note "published ($COMMIT) $pub"
+	if [ "$head" = "$pub" ]; then check PF-1 pass "the systems checkout is at the cutover commit"; else
+		check PF-1 FAIL "the systems checkout is not at the cutover commit"
+	fi
+}
+
+pf2() {
+	if ! out=$(git -C "$SYSTEMS" status --short 2>&1); then
+		printf '%s\n' "$out" | note_output
+		check PF-2 FAIL "git status failed in $SYSTEMS"
+	elif [ -z "$out" ]; then
+		check PF-2 pass "the systems checkout is clean"
+	else
+		printf '%s\n' "$out" | note_output
+		check PF-2 FAIL "the systems checkout has changes"
+	fi
+}
+
+pf3() {
+	if [ ! -e "$SYSTEMS/result" ]; then
+		check PF-3 FAIL "no ./result in $SYSTEMS: make build first"
+		return
+	fi
+	built=$(file_mtime "$SYSTEMS/result")
+	committed=$(git -C "$SYSTEMS" log -1 --format=%ct HEAD 2>/dev/null) || committed=
+	note "./result -> $(readlink "$SYSTEMS/result" 2>/dev/null)"
+	if [ -n "$built" ] && [ -n "$committed" ] && [ "$built" -gt "$committed" ]; then
+		check PF-3 pass "./result is newer than the commit"
+	else
+		check PF-3 FAIL "./result is not newer than the commit (result ${built:-?}, commit ${committed:-?})"
+	fi
+}
+
+pf4() {
+	list=$(peers)
+	if [ -z "$list" ]; then
+		check PF-4 FAIL "no other machines: give --peers or the machine lines of $RC_CONFIG/devtools/config"
+		return
+	fi
+	bad=
+	for p in $list; do
+		if out=$(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$p" true </dev/null 2>&1); then
+			note "$p: ok"
+		else
+			note "$p: failed"
+			printf '%s\n' "$out" | note_output
+			bad="$bad $p"
+		fi
+	done
+	if [ -z "$bad" ]; then check PF-4 pass "ssh with strict host keys works to $(printf '%s' "$list" | tr '\n' ' ')"; else
+		check PF-4 FAIL "ssh failed to:$bad (fix it in systems, SY22)"
+	fi
+}
+
+pf5() {
+	# Provisional (SY18, P3-06): the per-user profile of the built generation
+	# lies at etc/profiles/per-user/<user> inside ./result; on darwin this
+	# place is UNVERIFIED until P3-06 records it.
+	gen=$SYSTEMS/result/etc/profiles/per-user/$user
+	bad=
+	for tool in zsh git devtools; do
+		if [ -x "$gen/bin/$tool" ]; then note "$gen/bin/$tool"; else bad="$bad $tool"; fi
+	done
+	if [ -z "$bad" ]; then check PF-5 pass "the profile paths the unit names exist"; else
+		check PF-5 FAIL "missing in $gen/bin:$bad"
+	fi
+}
+
+pf6() {
+	list=$(peers)
+	if [ -z "$list" ]; then
+		check PF-6 FAIL "no other machines: give --peers or the machine lines of $RC_CONFIG/devtools/config"
+		return
+	fi
+	bad=
+	for p in $list; do
+		out=$(ssh -T -o BatchMode=yes -o ConnectTimeout=10 "$p" 'command -v devtools' </dev/null 2>&1)
+		case $out in
+		/*) note "$p: $out" ;;
+		*)
+			note "$p: devtools is not on the non-interactive PATH"
+			printf '%s\n' "$out" | note_output
+			bad="$bad $p"
+			;;
+		esac
+	done
+	if [ -z "$bad" ]; then check PF-6 pass "devtools is on the non-interactive PATH of each other machine"; else
+		check PF-6 FAIL "no devtools on the PATH of:$bad"
+	fi
+}
+
+pf7() {
+	cfg=$HOME/.config/devtools/config
+	directives() { grep -v -e '^[[:space:]]*#' "$1" | awk 'NF { print $1 }' | sort | uniq -c | sed 's/^ *//'; }
+	if [ -L "$cfg" ]; then
+		note "-> $(readlink "$cfg")"
+		[ -r "$cfg" ] && directives "$cfg" | note_output
+		check PF-7 pass "$cfg is a symlink"
+	elif [ ! -e "$cfg" ]; then
+		check PF-7 pass "$cfg is absent"
+	elif [ -f "$cfg" ]; then
+		directives "$cfg" | note_output
+		other=$(directives "$cfg" | awk '$2 != "bookmark"')
+		if [ -n "$other" ]; then
+			check PF-7 FAIL "$cfg is a file with directives other than bookmark: they belong in systems first (CO4)"
+		elif [ -e "$cfg.local" ]; then
+			check PF-7 FAIL "$cfg is a file and config.local exists: the mv of CO4 would replace it"
+		else
+			check PF-7 pass "$cfg is a file with bookmark lines only; CO4 moves it to config.local"
+		fi
+	else
+		check PF-7 FAIL "$cfg is neither a file nor a symlink"
+	fi
+}
+
+# hm_plist prints the tmux agent plist of the built generation.
+# Provisional (SY18, P3-06): the home-manager generation is found with
+# nix-store -qR ./result; the plist inside it is UNVERIFIED until P3-06
+# records the place, so both likely places are tried.
+hm_plist() {
+	for g in $(nix-store -qR "$SYSTEMS/result" 2>/dev/null | grep -- '-home-manager-generation$'); do
+		for f in "$g/LaunchAgents/$TMUX_LABEL.plist" "$g/home-files/Library/LaunchAgents/$TMUX_LABEL.plist"; do
+			[ -f "$f" ] && printf '%s\n' "$f" && return 0
+		done
+	done
+	return 1
+}
+
+pf8() {
+	if command -v herdr >/dev/null 2>&1; then
+		for args in 'workspace list' 'agent list' 'integration status'; do
+			note "herdr $args (ends in CO5 or CO6):"
+			# shellcheck disable=SC2086 # two words on purpose
+			herdr $args 2>&1 | note_output
+		done
+	else
+		note "herdr is not installed"
+	fi
+	note "tmux ls (keeps running through the cutover, RK12):"
+	command tmux ls 2>&1 | note_output
+	if [ "$os" = Linux ]; then
+		check PF-8 pass "listed what ends in CO5 or CO6 and what keeps running"
+		return
+	fi
+	installed=$HOME/Library/LaunchAgents/$TMUX_LABEL.plist
+	if ! built=$(hm_plist); then
+		check PF-8 FAIL "could not find the tmux agent plist in the built generation, so it cannot tell whether CO6 restarts tmux"
+	elif [ ! -f "$installed" ]; then
+		check PF-8 FAIL "no installed tmux agent plist at $installed"
+	elif cmp -s "$built" "$installed"; then
+		check PF-8 pass "the tmux agent plists are equal: the tmux server is not restarted"
+	else
+		check PF-8 pass "the tmux agent plists are different: CO6 restarts the tmux server of this Mac and ends the sessions listed (drain them in CO2, SY23)"
+	fi
+}
+
+pf9() {
+	if [ ! -L "$PREV" ]; then
+		check PF-9 FAIL "no rollback target at $PREV: run preflight --record [GO]"
+		return
+	fi
+	target=$(readlink -f "$PREV" 2>/dev/null) || target=
+	note "$PREV -> ${target:-(dangling)}"
+	built=$(readlink -f "$SYSTEMS/result" 2>/dev/null) || built=
+	if [ "$os" = Linux ]; then activate=bin/switch-to-configuration; else activate=sw/bin/darwin-rebuild; fi
+	bad=
+	[ -n "$target" ] && [ -x "$target/$activate" ] || bad="${bad:+$bad; }not a system generation (no $activate)"
+	[ -n "$target" ] && [ "$target" != "$built" ] || bad="${bad:+$bad; }it is the generation built for the cutover"
+	nix-store --gc --print-roots 2>/dev/null | grep -qF -- "$PREV -> " || bad="${bad:+$bad; }not a GC root"
+	[ -d "$HOME/.local/state/herdr" ] || bad="${bad:+$bad; }herdr's state directory ~/.local/state/herdr is missing"
+	if [ -z "$bad" ]; then check PF-9 pass "the rollback target is saved and is a GC root"; else
+		check PF-9 FAIL "rollback target: $bad"
+	fi
+}
+
+pf10() {
+	out=$("$HERE/rc-server" status 2>&1)
+	printf '%s\n' "$out" | note_output
+	if [ "$(printf '%s\n' "$out" | head -n 1)" = stopped ]; then
+		check PF-10 pass "no rehearsal server is running"
+	else
+		check PF-10 FAIL "rc-server status does not say stopped: run rc-server stop (CO3)"
+	fi
+}
+
+# zig_of <flake.lock> prints zig_0_17.version of the nixpkgs that lock names.
+zig_of() {
+	_rev=$(jq -r .nodes.nixpkgs.locked.rev "$1" 2>/dev/null) || return 1
+	case $_rev in '' | null) return 1 ;; esac
+	note "$1: nixpkgs $_rev"
+	nix eval --raw "github:NixOS/nixpkgs/$_rev#zig_0_17.version" 2>/dev/null
+}
+
+pf11() {
+	if ! command -v jq >/dev/null 2>&1; then
+		check PF-11 FAIL "jq is not on the PATH"
+		return
+	fi
+	want=$(zig_of "$HERE/../../flake.lock") || want=
+	[ -n "$want" ] || want=$ZIG_DEFAULT
+	got=$(zig_of "$SYSTEMS/flake.lock") || got=
+	if [ "$got" = "$want" ]; then check PF-11 pass "the systems lock has zig_0_17 $got, as the devtools lock (SY25)"; else
+		check PF-11 FAIL "the systems lock has zig_0_17 ${got:-(missing)}, the devtools lock $want (SY25)"
+	fi
+}
+
+record() {
+	if [ -e "$PREV" ] || [ -L "$PREV" ]; then
+		die "the rollback target exists already: $PREV -> $(readlink "$PREV"). It is written once per machine; remove it by hand only to replace it"
+	fi
+	cur=$(readlink -f "$SYSTEM_PROFILE") || die "cannot resolve $SYSTEM_PROFILE"
+	built=$(readlink -f "$SYSTEMS/result" 2>/dev/null) || built=
+	[ "$cur" != "$built" ] || die "the running system is the generation built for the cutover; it cannot be the rollback target"
+	mkdir -p "${PREV%/*}" || die "cannot create ${PREV%/*}"
+	nix-store --realise "$cur" --add-root "$PREV" >/dev/null || die "nix-store --realise $cur --add-root $PREV failed"
+	say "recorded $PREV -> $cur"
+}
+
+# --- self-test ---------------------------------------------------------------
+
+st_gitc() {
+	"$ST_ENV" -i HOME="$ST/home" PATH="$ST/safe" GIT_CONFIG_NOSYSTEM=1 \
+		GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+		GIT_AUTHOR_DATE='1700000000 +0000' GIT_COMMITTER_DATE='1700000000 +0000' \
+		git -c commit.gpgsign=false -c init.defaultBranch=main -C "$ST/home/dev/systems" "$@" >/dev/null 2>&1 ||
+		die "self-test: git $* failed"
+}
+
+st_exe() {
+	mkdir -p "${1%/*}" || die "self-test: cannot create ${1%/*}"
+	printf '#!/bin/sh\nexit 0\n' >"$1" || die "self-test: cannot write $1"
+	chmod +x "$1" || die "self-test: cannot chmod $1"
+}
+
+self_test() {
+	st_begin
+	st_fakes ssh nix nix-store herdr tmux systemctl launchctl
+	H=$ST/home S=$ST/home/dev/systems
+	new=$ST/store/1111-nixos-system-new old=$ST/store/2222-nixos-system-old hm=$ST/store/3333-home-manager-generation
+	prev=$H/.local/state/devtools-cutover/previous-system
+	rev_sys=1111111111111111111111111111111111111111 rev_old=0bb2eedc20e4739f29e8045034f2828ad7054f8f
+	rev_dt=$(jq -r .nodes.nixpkgs.locked.rev "$HERE/../../flake.lock" 2>/dev/null) || rev_dt=
+	for t in zsh git devtools; do st_exe "$new/etc/profiles/per-user/$ST_USER/bin/$t"; done
+	st_exe "$old/bin/switch-to-configuration"
+	st_exe "$old/sw/bin/darwin-rebuild"
+	mkdir -p "$S" "$H/.local/state/herdr" "${prev%/*}" "$H/.cache/devtools-rc/config/devtools" \
+		"$H/.config/devtools" "$ST/nix/profiles" "$hm/LaunchAgents" "$H/Library/LaunchAgents" || die "self-test: mkdir failed"
+	printf '{"nodes":{"nixpkgs":{"locked":{"rev":"%s"}}}}\n' "$rev_sys" >"$S/flake.lock"
+	printf '<plist>tmux agent</plist>\n' >"$hm/LaunchAgents/$TMUX_LABEL.plist"
+	cp "$hm/LaunchAgents/$TMUX_LABEL.plist" "$H/Library/LaunchAgents/$TMUX_LABEL.plist"
+	st_gitc init
+	st_gitc add flake.lock
+	st_gitc commit -m cutover
+	st_gitc update-ref refs/remotes/origin/main HEAD
+	printf 'result\n' >"$S/.git/info/exclude"
+	for link in "$new:$S/result" "$old:$prev" "$old:$ST/nix/profiles/system"; do
+		ln -s "${link%%:*}" "${link#*:}" || die "self-test: ln $link failed"
+	done
+	printf 'machine macbook\nmachine macmini connect\n' >"$H/.cache/devtools-rc/config/devtools/config"
+	printf '# moved in CO4\nbookmark notes /tmp\n' >"$H/.config/devtools/config"
+
+	for p in macbook macmini; do
+		fx ssh "-T -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 $p true" ''
+		fx ssh "-T -o BatchMode=yes -o ConnectTimeout=10 $p command -v devtools" "/etc/profiles/per-user/$ST_USER/bin/devtools"
+	done
+	fx herdr 'workspace list' 'w1 devtools ~/dev/devtools'
+	fx herdr 'agent list' 'claude w1 idle'
+	fx herdr 'integration status' 'claude installed'
+	fx tmux ls 'main: 1 windows (created Wed Nov 18 10:00:00 2026)'
+	fx nix-store '--gc --print-roots' "$prev -> $old"
+	fx nix-store "-qR $S/result" "$new
+$hm"
+	fx nix "eval --raw github:NixOS/nixpkgs/$rev_sys#zig_0_17.version" 0.17.1
+	fx nix "eval --raw github:NixOS/nixpkgs/$rev_old#zig_0_17.version" 0.17.0
+	[ -n "$rev_dt" ] && fx nix "eval --raw github:NixOS/nixpkgs/$rev_dt#zig_0_17.version" 0.17.1
+	fx systemctl '--user is-active devtools-rc.service' inactive 3
+	fx launchctl "print gui/$ST_UID/org.nix-community.home.devtools-rc" 'Could not find service' 113
+
+	all='^PF-1 +pass.*PF-2 +pass.*PF-3 +pass.*PF-4 +pass.*PF-5 +pass.*PF-6 +pass.*PF-7 +pass.*PF-8 +pass.*PF-9 +pass.*PF-10 +pass.*PF-11 +pass'
+	one() { tr '\n' ' ' <"$ST/out" | grep -Eq "$all" || { say "self-test: FAIL  not every check passed in order" && ST_FAILS=$((ST_FAILS + 1)); }; }
+	run=$HERE/preflight
+	st_run pass 'Linux: every check passes' 'PF-11 +pass' DEVTOOLS_VERIFY_OS=Linux "$ST_SH" "$run"
+	one
+	st_run pass 'macOS: every check passes, the tmux plists are equal' 'PF-8 +pass +the tmux agent plists are equal' \
+		DEVTOOLS_VERIFY_OS=Darwin "$ST_SH" "$run"
+	one
+	printf '<plist>tmux agent, other zsh</plist>\n' >"$H/Library/LaunchAgents/$TMUX_LABEL.plist"
+	st_run pass 'macOS: a different tmux plist is reported, not failed' 'PF-8 +pass +the tmux agent plists are different' \
+		DEVTOOLS_VERIFY_OS=Darwin "$ST_SH" "$run"
+	printf 'dirty\n' >"$S/notes"
+	printf 'machine macbook\n' >>"$H/.config/devtools/config"
+	printf '{"nodes":{"nixpkgs":{"locked":{"rev":"%s"}}}}\n' "$rev_old" >"$S/flake.lock"
+	st_run fail 'Linux: a dirty checkout, a config with machine lines and a lock with Zig 0.17.0 fail' 'PF-2 +FAIL.*' DEVTOOLS_VERIFY_OS=Linux "$ST_SH" "$run"
+	for want in 'PF-7 +FAIL' 'PF-11 +FAIL.*0\.17\.0'; do
+		grep -Eq "$want" "$ST/out" || { say "self-test: FAIL  no /$want/" && ST_FAILS=$((ST_FAILS + 1)); }
+	done
+	rm -f "$S/notes" "$prev"
+	st_run fail 'Linux: no rollback target fails PF-9' 'PF-9 +FAIL +no rollback target' DEVTOOLS_VERIFY_OS=Linux "$ST_SH" "$run"
+	st_run pass 'Linux: --record writes the rollback target as a GC root' "recorded $prev -> $old" \
+		DEVTOOLS_VERIFY_OS=Linux NIX_STATE_DIR="$ST/nix" "$ST_SH" "$run" --record
+	grep -Eq 'PF-9 +pass' "$ST/out" || { say "self-test: FAIL  PF-9 after --record" && ST_FAILS=$((ST_FAILS + 1)); }
+	st_run fail 'Linux: --record refuses a second time' 'exists already' \
+		DEVTOOLS_VERIFY_OS=Linux NIX_STATE_DIR="$ST/nix" "$ST_SH" "$run" --record
+	st_finish
+}
+
+case $mode in
+self-test) self_test ;;
+record)
+	begin_checks
+	record
+	pf9
+	;;
+check)
+	begin_checks
+	pf1
+	pf2
+	pf3
+	pf4
+	pf5
+	pf6
+	pf7
+	pf8
+	pf9
+	pf10
+	pf11
+	;;
+esac
+if [ "$FAILED" -eq 0 ]; then
+	say "preflight: every check passed"
+	exit 0
+fi
+say "preflight: $FAILED failed"
+exit 1

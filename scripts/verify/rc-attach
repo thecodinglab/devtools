@@ -1,0 +1,56 @@
+#!/bin/sh
+# rc-attach [--practice] [--print]: the rehearsal client (PLAN 9.2 step 3, P3-04).
+#
+# Runs the candidate's `devtools attach` with rc-ssh as ssh on the PATH, the
+# hand-written config of ~/.cache/devtools-rc/config (XDG_CONFIG_HOME) and
+# DEVTOOLS_SERVICE=devtools-rc. DEVTOOLS_MULTIPLEXER is removed from the
+# environment, so the candidate's default decides: from the cutover commit
+# on that is devtools, and only such passes count for G4 and G5.
+# --practice sets DEVTOOLS_MULTIPLEXER=devtools instead, for a candidate
+# older than the cutover commit (K4, K5); its records are practice.
+#
+# A plain terminal only: it refuses when HERDR_ENV, TMUX or DEVTOOLS_PANE is
+# set, because there the candidate would use herdr, tmux or the hub of the
+# window and never start the rehearsal client (N18, N25).
+#
+# --print prints the command line and starts nothing.
+set -u
+PROG=${0##*/}
+HERE=$(cd "$(dirname "$0")" && pwd -P) || exit 1
+# shellcheck source=scripts/verify/lib.sh
+. "$HERE/lib.sh"
+USAGE='rc-attach [--practice] [--print]'
+
+practice='' print=''
+for arg do
+	case $arg in
+	--practice) practice=1 ;;
+	--print) print=1 ;;
+	*) usage ;;
+	esac
+done
+
+refuse_multiplexer_env
+
+# The command, without the caller's DEVTOOLS_MULTIPLEXER and
+# XDG_STATE_HOME: the rehearsal server lives in ~/.local/state/devtools.
+unset DEVTOOLS_MULTIPLEXER XDG_STATE_HOME
+set -- PATH="$RC_SSH_DIR:$PATH" XDG_CONFIG_HOME="$RC_CONFIG" DEVTOOLS_SERVICE="$RC_SERVICE"
+if [ -n "$practice" ]; then set -- DEVTOOLS_MULTIPLEXER=devtools "$@"; fi
+set -- env "$@" "$RC_BIN" attach
+
+if [ -n "$print" ]; then
+	print_cmd "$@"
+	exit 0
+fi
+
+[ -x "$RC_BIN" ] || die "no candidate at $RC_BIN; run rc-install first"
+if [ ! -f "$RC_CONFIG/devtools/config" ]; then
+	warn "no $RC_CONFIG/devtools/config: write the lines of 8.4.2 for this machine there first (README.md)"
+fi
+ensure_ssh_standin
+if [ -n "$practice" ]; then
+	say "practice pass: DEVTOOLS_MULTIPLEXER=devtools; this record does not count for G4 or G5" >&2
+fi
+say "In a rehearsal pane the candidate is $RC_BIN (devtools on the PATH there is the installed one)." >&2
+exec "$@"

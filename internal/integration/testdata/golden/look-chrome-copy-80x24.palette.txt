@@ -1,0 +1,35 @@
+size 80x24 cursor 0,0 hidden
+$ rg -n "= [0-9]" internal/hub/view.go|
+14:    gutter = 2 // the here mark and a space|
+15:    indent = 2 // worktrees under their project|
+16:    gap    = 3 // between columns|
+$|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+ copy   line 7,412 of 8,113   selecting lines       v select   y copy   q leave|
+styles
+1 0 2 reverse
+1 2 1 bold underline reverse
+1 3 77 reverse
+2 0 80 reverse
+3 0 80 reverse
+23 0 6 bold reverse
+23 54 6 p8
+23 65 4 p8
+23 74 5 p8

@@ -1,0 +1,231 @@
+#!/bin/sh
+# rc-server start|stop|status: the rehearsal server (PLAN 9.2 step 2, P3-04).
+#
+# Linux: a transient user unit devtools-rc (systemd-run) with the service
+# properties of 8.4.3 and a clean environment. macOS: /tmp/devtools-rc.plist
+# with the keys of 8.4.3, bootstrapped into gui/<uid> as
+# org.nix-community.home.devtools-rc, the label `devtools server restart`
+# derives from DEVTOOLS_SERVICE=devtools-rc. The server runs the candidate
+# of rc-install in the state directory of the real server.
+#
+# start and stop start and stop a service: each needs the user's go-ahead
+# (9.6). status only reads. --print-env prints the variables the server
+# hands to every rehearsal pane; --print prints the start command.
+#
+# Extra pane variables: each NAME=value line of ~/.cache/devtools-rc/server.env
+# is added to the server's environment and its name to DEVTOOLS_PASS_ENV,
+# as server.environment does for the real unit (8.4.3); on the mini that is
+# SSH_AUTH_SOCK (SY9).
+set -u
+PROG=${0##*/}
+HERE=$(cd "$(dirname "$0")" && pwd -P) || exit 1
+# shellcheck source=scripts/verify/lib.sh
+. "$HERE/lib.sh"
+USAGE='rc-server start|stop|status|--print-env|--print'
+
+[ $# -eq 1 ] || usage
+os=$(verify_os) || exit 1
+uid=$(id -u)
+user=$(id -un)
+label=org.nix-community.home.$RC_SERVICE
+unit=$RC_SERVICE.service
+plist=/tmp/$RC_SERVICE.plist
+# the profile 8.4.3 names; DEVTOOLS_RC_PROFILE for a host where it differs
+profile=${DEVTOOLS_RC_PROFILE:-/etc/profiles/per-user/$user}
+
+# extras prints the NAME=value lines of server.env, checked.
+extras() {
+	[ -f "$RC/server.env" ] || return 0
+	grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$RC/server.env" | while IFS= read -r _line; do
+		case $_line in
+		*[[:space:]\"\'\<\>\&]*) die "server.env: no blanks, quotes, <, > or & in: $_line" ;;
+		esac
+		_name=${_line%%=*}
+		case $_name in
+		"$_line" | '' | [0-9]* | *[!A-Z0-9_]*) die "server.env: not NAME=value: $_line" ;;
+		HOME | USER | LOGNAME | PATH | SHELL | LANG | DEVTOOLS_*) die "server.env: $_name is set by rc-server" ;;
+		esac
+		printf '%s\n' "$_line"
+	done
+}
+
+# pane_env prints the variables that reach every rehearsal pane through
+# DEVTOOLS_PASS_ENV (3.2.1): DEVTOOLS_MULTIPLEXER, DEVTOOLS_SERVICE, the
+# extras, and DEVTOOLS_PASS_ENV itself with their names, sorted, joined by
+# commas (8.4.3).
+pane_env() {
+	_extra=$(extras) || exit 1
+	_names=$( {
+		printf 'DEVTOOLS_MULTIPLEXER\nDEVTOOLS_SERVICE\n'
+		[ -n "$_extra" ] && printf '%s\n' "$_extra" | sed 's/=.*//'
+	} | LC_ALL=C sort | tr '\n' ',' | sed 's/,$//')
+	printf 'DEVTOOLS_MULTIPLEXER=devtools\n'
+	printf 'DEVTOOLS_SERVICE=%s\n' "$RC_SERVICE"
+	[ -n "$_extra" ] && printf '%s\n' "$_extra"
+	printf 'DEVTOOLS_PASS_ENV=%s\n' "$_names"
+}
+
+# server_env prints the whole environment of the server, one NAME=value per
+# line: nothing of the caller's environment except HOME and the user, the
+# PATH of 8.4.3, SHELL and LANG as 8.4.5 sets them, and pane_env.
+server_env() {
+	printf 'HOME=%s\nUSER=%s\nLOGNAME=%s\n' "$HOME" "$user" "$user"
+	printf 'PATH=%s/bin:/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin\n' "$profile"
+	printf 'SHELL=%s/bin/zsh\nLANG=en_US.UTF-8\n' "$profile"
+	if [ "$os" = Linux ] && [ -n "${XDG_RUNTIME_DIR-}" ]; then
+		printf 'XDG_RUNTIME_DIR=%s\n' "$XDG_RUNTIME_DIR"
+	fi
+	pane_env
+}
+
+# systemd_run runs (or, with print, prints) the systemd-run command.
+systemd_run() {
+	_envfile=$(mktemp "${TMPDIR:-/tmp}/devtools-rc-env.XXXXXX") || die "mktemp failed"
+	(server_env) >"$_envfile" || {
+		rm -f "$_envfile"
+		exit 1
+	}
+	set -- systemd-run --user --unit "$RC_SERVICE" \
+		--description "devtools rehearsal server (scripts/verify/rc-server)" \
+		-p Restart=always -p RestartSec=1 -p KillMode=mixed -p TimeoutStopSec=10 -p OOMPolicy=continue \
+		-- /usr/bin/env -i
+	while IFS= read -r _kv; do set -- "$@" "$_kv"; done <"$_envfile"
+	rm -f "$_envfile"
+	set -- "$@" "$RC_BIN" server
+	if [ -n "$print" ]; then
+		print_cmd "$@"
+		return 0
+	fi
+	"$@"
+}
+
+xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+# plist_text prints the agent of 8.4.3 for the candidate.
+plist_text() {
+	cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$label</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$(xml "$RC_BIN")</string>
+		<string>server</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>StandardErrorPath</key>
+	<string>$(xml "$HOME/Library/Logs/$RC_SERVICE.log")</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+EOF
+	server_env | grep -v -e '^HOME=' -e '^USER=' -e '^LOGNAME=' | while IFS= read -r _kv; do
+		printf '\t\t<key>%s</key>\n\t\t<string>%s</string>\n' "${_kv%%=*}" "$(xml "${_kv#*=}")"
+	done
+	printf '\t</dict>\n</dict>\n</plist>\n'
+}
+
+# state prints running, stopped, failed, or what the service manager says.
+state() {
+	if [ "$os" = Linux ]; then
+		_s=$(systemctl --user is-active "$unit" 2>/dev/null)
+		case $_s in
+		active | activating | reloading | deactivating) say running ;;
+		failed) say failed ;;
+		*) say stopped ;;
+		esac
+	else
+		if ! _out=$(launchctl print "gui/$uid/$label" 2>/dev/null); then
+			say stopped
+			return
+		fi
+		_s=$(printf '%s\n' "$_out" | sed -n 's/^[[:space:]]*state = \(.*\)$/\1/p' | head -n 1)
+		case $_s in
+		running) say running ;;
+		*) say "loaded, state ${_s:-unknown}" ;;
+		esac
+	fi
+}
+
+# real_service_exists answers whether the managed devtools-server exists.
+real_service_exists() {
+	if [ "$os" = Linux ]; then
+		_load=$(systemctl --user show -p LoadState --value "$REAL_UNIT" 2>/dev/null) ||
+			die "systemctl --user show $REAL_UNIT failed"
+		[ "$_load" != not-found ]
+	else
+		[ -e "$HOME/Library/LaunchAgents/$REAL_LABEL.plist" ] ||
+			launchctl print "gui/$uid/$REAL_LABEL" >/dev/null 2>&1
+	fi
+}
+
+print=
+case $1 in
+--print | start) extras >/dev/null || exit 1 ;; # a bad server.env stops before anything is written
+esac
+case $1 in
+--print-env)
+	pane_env
+	;;
+--print)
+	print=1
+	if [ "$os" = Linux ]; then systemd_run; else
+		say "# $plist"
+		plist_text
+		print_cmd launchctl bootstrap "gui/$uid" "$plist"
+	fi
+	;;
+status)
+	s=$(state)
+	say "$s"
+	[ "$s" = running ] || exit 1
+	if [ -x "$RC_BIN" ]; then
+		(unset XDG_STATE_HOME DEVTOOLS_SOCKET && DEVTOOLS_SERVICE=$RC_SERVICE "$RC_BIN" server status --json) ||
+			warn "the unit runs, but the server does not answer"
+	fi
+	;;
+start)
+	real_service_exists && die "refused: the real devtools server ($REAL_UNIT, $REAL_LABEL) exists on this machine; the rehearsal runs only before the cutover"
+	[ "$(state)" = stopped ] || die "the rehearsal server is not stopped: $(state). Run: $PROG stop"
+	[ -x "$RC_BIN" ] || die "no candidate at $RC_BIN; run rc-install first"
+	if [ "$os" = Linux ]; then
+		systemd_run || die "systemd-run failed"
+	else
+		rm -f "$plist"
+		(
+			set -C
+			plist_text >"$plist"
+		) || die "cannot write $plist"
+		launchctl bootstrap "gui/$uid" "$plist" || die "launchctl bootstrap gui/$uid $plist failed"
+	fi
+	i=0
+	until (unset XDG_STATE_HOME DEVTOOLS_SOCKET && DEVTOOLS_SERVICE=$RC_SERVICE "$RC_BIN" server status >/dev/null 2>&1); do
+		i=$((i + 1))
+		[ "$i" -lt 50 ] || die "started, but the server did not answer within 5 s; see: $PROG status"
+		sleep 0.1 2>/dev/null || sleep 1
+	done
+	say "running"
+	;;
+stop)
+	if [ "$os" = Linux ]; then
+		if [ "$(state)" != stopped ]; then
+			systemctl --user stop "$unit" || die "systemctl --user stop $unit failed"
+		fi
+		systemctl --user reset-failed "$unit" 2>/dev/null
+	else
+		if [ "$(state)" != stopped ]; then
+			launchctl bootout "gui/$uid/$label" || die "launchctl bootout gui/$uid/$label failed"
+		fi
+		rm -f "$plist"
+	fi
+	say stopped
+	;;
+*) usage ;;
+esac

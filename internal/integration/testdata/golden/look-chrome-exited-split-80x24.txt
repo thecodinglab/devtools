@@ -1,0 +1,25 @@
+size 80x24 cursor 4,0 visible
+  1 package hub                         │zsh was killed (signal 9).|
+  2                                     │Press enter to start it again.|
+  3 import (                            │|
+  4     "strings"                       │|
+  5 )                                   │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        ◂|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+ desktop  devtools-main   1 nvim  2 claude ◆  3 zsh       ◆ 1  ✓ 1  ● 2   14:32|

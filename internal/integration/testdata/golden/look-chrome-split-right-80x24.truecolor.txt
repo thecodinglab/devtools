@@ -1,0 +1,57 @@
+size 80x24 cursor 4,0 visible
+  1 package hub                         │$ go test ./internal/hub/ -count=1|
+  2                                     │ok      devtools/internal/hub   0.412s|
+  3 import (                            │$|
+  4     "strings"                       │|
+  5 )                                   │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        ◂|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+                                        │|
+ desktop  devtools-main   1 nvim  2 claude ◆  3 zsh       ◆ 1  ✓ 1  ● 2   14:32|
+styles
+0 40 1 p8
+1 40 1 p8
+2 40 1 p8
+3 40 1 p8
+4 40 1 p8
+5 40 1 p8
+6 40 1 p8
+7 40 1 p8
+8 40 1 p8
+9 40 1 p8
+10 40 1 p8
+11 40 1 bold #e6e7eb
+12 40 1 p8
+13 40 1 p8
+14 40 1 p8
+15 40 1 p8
+16 40 1 p8
+17 40 1 p8
+18 40 1 p8
+19 40 1 p8
+20 40 1 p8
+21 40 1 p8
+22 40 1 p8
+23 1 7 p8
+23 10 13 bold
+23 26 6 bold p4
+23 34 8 p8
+23 43 1 #ec8a3f
+23 46 5 p8
+23 58 3 #ec8a3f
+23 68 3 #a6a8b0

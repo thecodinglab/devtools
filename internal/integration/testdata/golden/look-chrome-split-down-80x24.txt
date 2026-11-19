@@ -1,0 +1,25 @@
+size 80x24 cursor 2,14 visible
+  1 package hub|
+  2|
+  3 import (|
+|
+|
+|
+|
+|
+|
+|
+|
+────────────────────────────────────────▾───────────────────────────────────────|
+$ git status --short|
+ M internal/hub/view.go|
+$|
+|
+|
+|
+|
+|
+|
+|
+|
+ desktop  devtools-main   1 zsh  2 claude ◆  3 nvim       ◆ 1  ✓ 1  ● 2   14:32|

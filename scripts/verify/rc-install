@@ -1,0 +1,47 @@
+#!/bin/sh
+# rc-install <flake-ref> [nix build option]...
+#
+# Builds the release candidate into ~/.cache/devtools-rc/result and prints
+# the revision it was built from (PLAN 9.2 step 1, P3-04). Options after the
+# reference go to nix build unchanged, for example the --option sandbox false
+# of E2 fallback b, which needs the user's go-ahead (9.6). --print prints the
+# build command and does nothing.
+set -u
+PROG=${0##*/}
+HERE=$(cd "$(dirname "$0")" && pwd -P) || exit 1
+# shellcheck source=scripts/verify/lib.sh
+. "$HERE/lib.sh"
+USAGE='rc-install [--print] <flake-ref> [nix build option]...'
+
+print=
+if [ "${1-}" = --print ]; then
+	print=1
+	shift
+fi
+[ $# -ge 1 ] || usage
+case $1 in -*) usage ;; esac
+ref=$1
+shift
+
+if [ -n "$print" ]; then
+	print_cmd nix build "$ref" -o "$RC/result" "$@"
+	exit 0
+fi
+
+mkdir -p "$RC" || die "cannot create $RC"
+nix build "$ref" -o "$RC/result" "$@" || die "nix build $ref failed"
+[ -x "$RC_BIN" ] || die "the build has no bin/devtools: $RC_BIN"
+
+# The revision: "revision" of a clean git tree, "dirtyRevision" of a dirty
+# one (a rehearsal of a dirty tree is practice).
+meta=$(nix flake metadata --json "$ref") || die "nix flake metadata $ref failed"
+rev=$(printf '%s' "$meta" | sed -n 's/.*"revision":"\([0-9a-f]*\)".*/\1/p')
+if [ -z "$rev" ]; then
+	rev=$(printf '%s' "$meta" | sed -n 's/.*"dirtyRevision":"\([0-9a-f]*-dirty\)".*/\1/p')
+fi
+[ -n "$rev" ] || rev=unknown
+out=$(readlink "$RC/result")
+printf '%s %s %s\n' "$rev" "$ref" "$out" >"$RC/revision" || die "cannot write $RC/revision"
+say "revision $rev"
+say "built $out"
+say "candidate $RC_BIN"
