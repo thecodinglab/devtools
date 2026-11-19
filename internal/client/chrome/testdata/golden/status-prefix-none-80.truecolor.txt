@@ -1,0 +1,7 @@
+size 80x1 cursor 0,0 hidden
+ prefix                                macmini …  macbook …   Tue 17 Nov  14:32|
+styles
+0 0 8 bold reverse
+0 39 9 #a6a8b0
+0 50 9 #a6a8b0
+0 62 10 p8

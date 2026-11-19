@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ prefix   esc cancel   o hub   s sessions   a agents   c new tab   ? more|

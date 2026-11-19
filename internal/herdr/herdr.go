@@ -13,12 +13,6 @@ import (
 	"time"
 )
 
-// Inside reports whether devtools runs inside herdr, either in a pane or in
-// a custom command, so the API reaches the server it is attached to.
-func Inside() bool {
-	return os.Getenv("HERDR_ENV") == "1" || os.Getenv("HERDR_SOCKET_PATH") != ""
-}
-
 // Installed reports whether a herdr binary can be run.
 func Installed() bool {
 	if path := os.Getenv("HERDR_BIN_PATH"); path != "" {
@@ -29,9 +23,11 @@ func Installed() bool {
 	return err == nil
 }
 
-// Client runs herdr api commands, on a saved ssh machine when Machine is set.
-type Client struct {
-	Machine string
+// Client runs herdr api commands against the server of this machine.
+type Client struct{}
+
+func (c Client) output(args ...string) ([]byte, error) {
+	return output(args...)
 }
 
 type Workspace struct {
@@ -62,83 +58,17 @@ func parseWorkspaceList(out []byte) ([]Workspace, error) {
 	return resp.Result.Workspaces, nil
 }
 
-type Tab struct {
-	ID     string `json:"tab_id"`
-	Number int    `json:"number"`
-	Label  string `json:"label"`
-}
-
-func (c Client) ListTabs(workspace string) ([]Tab, error) {
-	out, err := c.output("tab", "list", "--workspace", workspace)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Result struct {
-			Tabs []Tab `json:"tabs"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("unexpected herdr tab list output: %w", err)
-	}
-	return resp.Result.Tabs, nil
-}
-
-// TabPanes returns the pane ids of a workspace grouped by tab, in layout
-// order.
-func (c Client) TabPanes(workspace string) (map[string][]string, error) {
-	out, err := c.output("pane", "list", "--workspace", workspace)
-	if err != nil {
-		return nil, err
-	}
-	return parsePaneList(out)
-}
-
-func parsePaneList(out []byte) (map[string][]string, error) {
-	var resp struct {
-		Result struct {
-			Panes []struct {
-				ID  string `json:"pane_id"`
-				Tab string `json:"tab_id"`
-			} `json:"panes"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("unexpected herdr pane list output: %w", err)
-	}
-	panes := make(map[string][]string)
-	for _, pane := range resp.Result.Panes {
-		panes[pane.Tab] = append(panes[pane.Tab], pane.ID)
-	}
-	return panes, nil
-}
-
-func (c Client) CapturePane(pane string) (string, error) {
-	out, err := c.output("pane", "read", pane, "--source", "visible", "--format", "ansi")
-	return string(out), err
-}
-
 // Switch focuses the workspace for a session, creating it in dir first.
 func (c Client) Switch(dir, session string) error {
-	_, err := c.SwitchWorkspace(dir, session)
-	return err
-}
-
-// SwitchWorkspace is Switch, returning the id of the workspace.
-func (c Client) SwitchWorkspace(dir, session string) (string, error) {
 	workspace, err := c.find(session)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if workspace != "" {
-		return workspace, c.FocusWorkspace(workspace)
+		return c.FocusWorkspace(workspace)
 	}
-	out, err := c.output("workspace", "create", "--cwd", dir, "--label", session, "--focus")
-	if err != nil {
-		return "", err
-	}
-	_, workspace, err = parseCreated(out)
-	return workspace, err
+	_, err = c.output("workspace", "create", "--cwd", dir, "--label", session, "--focus")
+	return err
 }
 
 func (c Client) FocusWorkspace(workspace string) error {
@@ -146,34 +76,35 @@ func (c Client) FocusWorkspace(workspace string) error {
 	return err
 }
 
-// CloseForRemoval moves over to the fallback session and returns a function
-// that closes the workspace of a session about to be removed. herdr kills
-// every process in a workspace it closes, a devtools running in it included,
-// so only call it once the removal is done. Outside herdr there is nothing
-// to move away from, and nothing to close without a running server.
-func (c Client) CloseForRemoval(targetSession, fallbackSession, fallbackDir string) (func() error, error) {
+// Remove is CloseForRemoval for the herdr backend of internal/backend
+// (P2-14): whether the caller is inside herdr is the argument inside, not
+// read from the environment. Inside herdr it moves over to the fallback
+// session first; outside there is nothing to move away from, and nothing
+// to close without a running server. The returned function closes the
+// workspace of target; herdr kills every process in it, a devtools running
+// in it included, so call it once the removal is done.
+func (c Client) Remove(target, fallback, fallbackDir string, inside bool) (func() error, error) {
 	noop := func() error { return nil }
-	inside := Inside()
-	if !inside && c.Machine == "" {
+	if !inside {
 		running, err := ServerRunning()
 		if err != nil || !running {
 			return noop, err
 		}
 	}
-	target, err := c.find(targetSession)
+	workspace, err := c.find(target)
 	if err != nil {
 		return nil, err
 	}
-	if target == "" {
+	if workspace == "" {
 		return noop, nil
 	}
-	if inside && targetSession != fallbackSession {
-		if err := c.Switch(fallbackDir, fallbackSession); err != nil {
+	if inside && target != fallback {
+		if err := c.Switch(fallbackDir, fallback); err != nil {
 			return nil, err
 		}
 	}
 	return func() error {
-		_, err := c.output("workspace", "close", target)
+		_, err := c.output("workspace", "close", workspace)
 		return err
 	}, nil
 }
@@ -189,17 +120,6 @@ func (c Client) find(session string) (string, error) {
 		}
 	}
 	return "", nil
-}
-
-func (c Client) args(args ...string) []string {
-	if c.Machine == "" {
-		return args
-	}
-	return append([]string{"--machine", c.Machine}, args...)
-}
-
-func (c Client) output(args ...string) ([]byte, error) {
-	return output(c.args(args...)...)
 }
 
 func bin() string {
@@ -245,23 +165,4 @@ func errorMessage(stderr []byte, err error) string {
 		return msg
 	}
 	return err.Error()
-}
-
-// parseCreated reads the root pane and the workspace id from herdr
-// workspace create.
-func parseCreated(out []byte) (string, string, error) {
-	var resp struct {
-		Result struct {
-			Workspace struct {
-				ID string `json:"workspace_id"`
-			} `json:"workspace"`
-			RootPane struct {
-				ID string `json:"pane_id"`
-			} `json:"root_pane"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil || resp.Result.RootPane.ID == "" {
-		return "", "", fmt.Errorf("unexpected herdr workspace create output: %q", strings.TrimSpace(string(out)))
-	}
-	return resp.Result.RootPane.ID, resp.Result.Workspace.ID, nil
 }

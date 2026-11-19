@@ -1,0 +1,8 @@
+size 80x1 cursor 0,0 hidden
+  ⏎ switch   ⌃N new feature   ⌃G merge into main   tab sessions   esc close|
+styles
+0 4 6 p8
+0 16 11 p8
+0 33 15 p8
+0 55 8 p8
+0 70 5 p8

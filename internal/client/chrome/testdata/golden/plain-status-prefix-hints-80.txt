@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+ prefix  esc cancel|
+styles
+0 0 8 bold reverse

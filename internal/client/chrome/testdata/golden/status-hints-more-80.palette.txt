@@ -1,0 +1,9 @@
+size 80x1 cursor 0,0 hidden
+ prefix   n next tab   p previous tab   1-9 tab   % split right   ? more|
+styles
+0 0 8 bold reverse
+0 12 8 p8
+0 25 12 p8
+0 44 3 p8
+0 52 11 p8
+0 68 4 p8

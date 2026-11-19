@@ -1,0 +1,9 @@
+size 40x8 cursor 4,0 visible
+HUB all|
+|
+|
+|
+|
+|
+|
+ desktop  devtools-main   [1 zsh]|

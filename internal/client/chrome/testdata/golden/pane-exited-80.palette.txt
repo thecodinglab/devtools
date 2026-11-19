@@ -1,0 +1,5 @@
+size 80x2 cursor 0,0 hidden
+zsh was killed (signal 9).|
+Press enter to start it again.|
+styles
+1 0 30 p8

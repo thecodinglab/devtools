@@ -1,0 +1,7 @@
+size 19x6 cursor 0,0 hidden
+|
+|
+ Window too small|
+  20 by 6 needed|
+|
+|

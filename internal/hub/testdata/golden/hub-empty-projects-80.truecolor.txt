@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  No projects yet. Clone one with devtools clone <url>.|
+styles
+0 2 53 p8

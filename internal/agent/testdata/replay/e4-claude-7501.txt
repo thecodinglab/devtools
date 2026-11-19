@@ -1,0 +1,28 @@
+# fixture e4-claude-7501. provisional (E4): synthetic, built from pane run B1
+# (scripted fake whose bytes follow the Claude Code 2.1.319 bundle and the
+# library header); NOT a recording of Claude Code. Replace with the real
+# recording once E4's [GO] part has run.
+# Columns: ms, input kind, value, expected tracker status after the input
+# (rules of 3.6.2: into working/blocked immediate, out of working after 500 ms,
+# idle after working and not seen = done; clear and done map to idle).
+# report values are what the PROGRAM_STATUS callback delivered (state/kind).
+0      proc    .claude-wrapped [/nix/store/4ikygy36qrkaxixgjpnwh5y84diqwai2-claude-code-2.1.319/bin/claude --settings /nix/store/16gi670xv2hrqpbi65s38g0y356367w9-claude-code-proxy-settings.json]   unknown
+1      title   "Claude Code"                 unknown
+1      report  idle/                         idle
+1000   report  working/                      working
+2203   title   "Claude Code"                 working
+2203   report  blocked/permission            blocked
+3001   report  working/                      working
+4202   title   "Claude Code"                 working
+4202   report  blocked/question              blocked
+5000   report  working/                      working
+7000   title   "Claude Code"                 working
+7000   report  idle/                         working
+7500   tick    -                             done
+8001   report  working/                      working
+9202   title   "Claude Code"                 working
+9202   report  done/                         working
+9702   tick    -                             done
+10000  report  clear/                        done
+10500  proc    (no match)                    done
+11500  proc    (no match)                    gone

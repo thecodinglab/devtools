@@ -1,0 +1,5 @@
+size 80x1 cursor 0,0 hidden
+ scrolled   line 7,412 of 8,113                                 any key returns|
+styles
+0 0 10 bold reverse
+0 64 15 p8

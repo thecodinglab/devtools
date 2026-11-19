@@ -1,0 +1,36 @@
+size 80x23 cursor 4,0 visible
+  › Switch to a worktree, or name a new feature          all  sessions  agents|
+|
+  Loading worktrees…|
+|
+  macmini   connecting…|
+|
+  macbook   connecting…|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+  esc close|
+styles
+0 4 43 p8
+0 57 3 bold p4
+0 62 8 p8
+0 72 6 p8
+2 2 18 p8
+4 1 9 bold #e6e7eb on #30323a
+4 12 11 #a6a8b0
+6 1 9 bold #e6e7eb on #30323a
+6 12 11 #a6a8b0
+22 2 3 #a6a8b0
+22 6 5 p8

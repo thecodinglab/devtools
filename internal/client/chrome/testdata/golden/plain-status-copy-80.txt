@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+ copy  line 7,412 of 10,000  selecting lines        v select   y copy   q leave|
+styles
+0 0 6 bold reverse

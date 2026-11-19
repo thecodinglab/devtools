@@ -2,18 +2,18 @@ package cli
 
 import (
 	"bytes"
-	"context"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"devtools/internal/herdr"
 	"devtools/internal/hub"
-	"devtools/internal/peer"
+	"devtools/internal/mux"
+	"devtools/internal/testkit"
+	"devtools/internal/ui"
 )
 
 func TestMain(m *testing.M) {
@@ -25,22 +25,32 @@ func TestMain(m *testing.M) {
 	os.Setenv("DEVTOOLS_CONFIG", filepath.Join(tmp, "config"))
 	// Nor drive the herdr session the tests may run in: without a fake herdr
 	// the missing binary makes devtools fall back to the fake tmux.
-	for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_SESSION", "DEVTOOLS_MULTIPLEXER", "TMUX"} {
+	for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_SESSION", "DEVTOOLS_MULTIPLEXER", "TMUX",
+		// nor take the terminal the tests run in for a pane of anything (3.4)
+		"TMUX_PANE", "DEVTOOLS_PANE", "DEVTOOLS_SOCKET", "DEVTOOLS_TTY", "DEVTOOLS_TRUST_TERMINAL", "STY", "ZELLIJ", "ZELLIJ_SESSION_NAME"} {
 		os.Unsetenv(name)
 	}
 	os.Setenv("HERDR_BIN_PATH", filepath.Join(tmp, "no-herdr"))
-	// Nor ask the herdr client of the developer to show anything, and give
-	// up on an acknowledgement quickly: the fake herdr has no client.
-	os.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
-	herdr.ReceiveWait = 100 * time.Millisecond
-	herdr.DoneWait = time.Second
-	// Nor ask the network for other machines: a devtools serve on the LAN
-	// would answer.
-	discoverPeers = func(context.Context, peer.Options) <-chan peer.Result {
-		ch := make(chan peer.Result)
-		close(ch)
-		return ch
+	// Nor reach a tmux of the developer: a test that wants tmux puts its
+	// fake first on PATH; without one the tmux found is this one, which
+	// refuses, and a real tmux would only find sockets under TMUX_TMPDIR.
+	os.Setenv("TMUX_TMPDIR", tmp)
+	noTmux := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(noTmux, 0o755); err != nil {
+		panic(err)
 	}
+	if err := os.WriteFile(filepath.Join(noTmux, "tmux"), []byte("#!/bin/sh\necho 'tmux: no fake tmux in this test' >&2\nexit 1\n"), 0o755); err != nil {
+		panic(err)
+	}
+	os.Setenv("PATH", noTmux+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The descriptors mux.Detect asks about are no terminal, whatever go
+	// test was started with: a test that needs one hands in a pty.
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		panic(err)
+	}
+	terminalIn, terminalOut = devNull, devNull
+	os.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)
@@ -63,7 +73,7 @@ func TestSwitchUsesFakeTmuxForNormalRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(strings.Fields(string(out)), " ")
-	want := "new-session -A -s small-main -c " + project
+	want := "has-session -t small-main new-session -d -s small-main -c " + project
 	if got != want {
 		t.Fatalf("tmux args = %q, want %q", got, want)
 	}
@@ -82,7 +92,9 @@ func TestSwitchCreatesHerdrWorkspace(t *testing.T) {
 		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
 	}
 	got := readLog(t, log)
-	want := "workspace list\nworkspace create --cwd " + project + " --label small-main --focus\nmachine list --json"
+	// no "machine list --json": a local switch no longer brings the window
+	// back from another machine (the showLocal call went with P2-08a)
+	want := "workspace list\nworkspace create --cwd " + project + " --label small-main --focus"
 	if got != want {
 		t.Fatalf("herdr args = %q, want %q", got, want)
 	}
@@ -101,12 +113,18 @@ func TestSwitchFocusesExistingHerdrWorkspace(t *testing.T) {
 		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
 	}
 	got := readLog(t, log)
-	want := "workspace list\nworkspace focus w2\nmachine list --json"
+	// no "machine list --json", as above
+	want := "workspace list\nworkspace focus w2"
 	if got != want {
 		t.Fatalf("herdr args = %q, want %q", got, want)
 	}
 }
 
+// The name is today's, the assertion revision 2's (P2-08a, K1). It asserted
+// a switch-client; now both marks are live and no terminal matches the
+// tmux pane, so the command cannot tell which one it is in (3.4): the
+// switch is ambiguous and ends with status 1. The matching case, where the
+// tmux pane is this terminal, is a row of TestDetect (internal/mux).
 func TestSwitchPrefersTmuxNestedInHerdr(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "small")
@@ -114,18 +132,21 @@ func TestSwitchPrefersTmuxNestedInHerdr(t *testing.T) {
 
 	herdrLog := installFakeHerdr(t, "")
 	tmuxLog := installFakeTmux(t)
-	t.Setenv("TMUX", "/tmp/tmux-501/default,1,0")
+	insideFakeTmux(t)
 	t.Setenv("DEVTOOLS_ROOT", root)
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("Run returned %d, stderr=%s", code, stderr.String())
+	if code := Run([]string{"switch", "small"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("Run returned %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if got, want := strings.TrimSpace(stderr.String()), ui.Message("ambiguous", "tmux", "herdr"); got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 	if got := readLog(t, herdrLog); got != "" {
 		t.Fatalf("herdr args = %q, want none", got)
 	}
-	if got := readLog(t, tmuxLog); !strings.Contains(got, "switch-client -t small-main") {
-		t.Fatalf("tmux args = %q, want a switch-client", got)
+	if got := readLog(t, tmuxLog); got != "" {
+		t.Fatalf("tmux args = %q, want none", got)
 	}
 }
 
@@ -238,7 +259,7 @@ func TestSwitchToBookmarkUsesBookmarkNameAsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(strings.Fields(string(out)), " ")
-	want := "new-session -A -s notes -c " + notesPath
+	want := "has-session -t notes new-session -d -s notes -c " + notesPath
 	if got != want {
 		t.Fatalf("tmux args = %q, want %q", got, want)
 	}
@@ -455,7 +476,7 @@ func TestWorkCommandInfersProjectFromCurrentDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(strings.Fields(string(out)), " ")
-	wantTmux := "new-session -A -s widgets-feature-cli -c " + want
+	wantTmux := "has-session -t widgets-feature-cli new-session -d -s widgets-feature-cli -c " + want
 	if got != wantTmux {
 		t.Fatalf("tmux args = %q, want %q", got, wantTmux)
 	}
@@ -486,7 +507,7 @@ func TestNewProjectInitializesNormalRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(strings.Fields(string(out)), " ")
-	want := "new-session -A -s fresh-main -c " + project
+	want := "has-session -t fresh-main new-session -d -s fresh-main -c " + project
 	if got != want {
 		t.Fatalf("tmux args = %q, want %q", got, want)
 	}
@@ -511,138 +532,135 @@ func TestCloneStartsTmuxSessionForMainWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(strings.Fields(string(out)), " ")
-	want := "new-session -A -s widgets-main -c " + mainPath
+	want := "has-session -t widgets-main new-session -d -s widgets-main -c " + mainPath
 	if got != want {
 		t.Fatalf("tmux args = %q, want %q", got, want)
 	}
 }
 
+// The five hub tests below were rewritten by P2-08b onto the recording
+// multiplexer of P2-08a. They replaced runHub through stubHub, a path no
+// command takes since P2-08b: every command that opens a hub goes through
+// enter, which inside a backend is Hub with the mode and the query and in a
+// plain terminal Enter with the entry (5.3.8).
+
+// Was: the legacy hub opened in mode all with the query and the two
+// worktrees as its items, and its pick ran show. Now: inside tmux Hub in
+// mode all with the query; in a plain terminal Enter with that hub.
 func TestSwitchAmbiguousQueryOpensSwitcherWithTheQuery(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "widgets")
-	featurePath := filepath.Join(project, "feature-cli")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	gitCmd(t, project, "init", "--bare", ".bare")
 	makeRepo(t, filepath.Join(project, "main"))
-	makeRepo(t, featurePath)
-
-	tmuxLog := installFakeTmux(t)
+	makeRepo(t, filepath.Join(project, "feature-cli"))
 	t.Setenv("DEVTOOLS_ROOT", root)
-	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
-		if opts.Mode != hub.ModeAll || opts.Query != "widgets" {
-			t.Fatalf("mode=%v query=%q, want all and the query", opts.Mode, opts.Query)
-		}
-		items, err := opts.Load()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var labels []string
-		for _, item := range items {
-			labels = append(labels, item.Label)
-		}
-		if strings.Join(labels, ",") != "widgets/feature-cli,widgets/main" {
-			t.Fatalf("items = %v", labels)
-		}
-		return &items[0], nil
-	})
-	var stdout, stderr bytes.Buffer
 
-	if code := Run([]string{"switch", "widgets"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
-	}
-	tmuxOut, err := os.ReadFile(tmuxLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotTmux := strings.Join(strings.Fields(string(tmuxOut)), " ")
-	wantTmux := "new-session -A -s widgets-feature-cli -c " + featurePath
-	if gotTmux != wantTmux {
-		t.Fatalf("tmux args = %q, want %q", gotTmux, wantTmux)
-	}
+	t.Run("inside tmux", func(t *testing.T) {
+		installFakeTmux(t)
+		insideFakeTmux(t)
+		r := &recordingMux{name: mux.Tmux}
+		useRecording(t, r)
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"switch", "widgets"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
+		}
+		wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeAll, "widgets"))
+	})
+	t.Run("in a plain terminal", func(t *testing.T) {
+		installFakeTmux(t)
+		scriptedTerminal(t, ordinaryTerminal)
+		r := &recordingMux{name: mux.Tmux}
+		useRecording(t, r)
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"switch", "widgets"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("switch returned %d, stderr=%s", code, stderr.String())
+		}
+		wantCalls(t, r, fmt.Sprintf("Enter valid=true hub %d %q", hub.ModeAll, "widgets"))
+	})
 }
 
+// Was: inside tmux the legacy hub listed the open tmux sessions and
+// switched in place with switch-client. Now: Hub in the sessions scope;
+// the listing and the switch-client of the tmux hub are
+// TestTmuxHubShowsThePick and TestTmuxSessionsListsTheSessionsOfThisMachine
+// (internal/backend).
 func TestSessionsOpensSwitcherOnOpenTmuxSessions(t *testing.T) {
-	log := installFakeTmuxWithSessions(t, "work\t1\t0\nops\t2\t1")
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	installFakeTmuxWithSessions(t, "work\t1\t0\nops\t2\t1")
+	insideFakeTmux(t)
 	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
-	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
-		if opts.Mode != hub.ModeOpen || !opts.SwitchInPlace {
-			t.Fatalf("mode=%v in place=%v, want open sessions switched in place", opts.Mode, opts.SwitchInPlace)
-		}
-		sessions, others, err := opts.Backend.Sessions()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !sessions["ops"].Open || !sessions["ops"].Focused || !sessions["work"].Open || len(others) != 2 {
-			t.Fatalf("sessions = %+v, others = %+v", sessions, others)
-		}
-		_, err = opts.Backend.Switch(others[1])
-		return nil, err
-	})
+	r := &recordingMux{name: mux.Tmux}
+	useRecording(t, r)
 	var stdout, stderr bytes.Buffer
-
 	if code := Run([]string{"sessions"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("sessions returned %d, stderr=%s", code, stderr.String())
 	}
-	got := tmuxCommands(t, log)
-	want := []string{
-		"list-sessions -F #{session_name}\t#{session_windows}\t#{session_attached}",
-		"switch-client -t ops",
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("tmux commands = %#v, want %#v", got, want)
-	}
+	wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeOpen, ""))
 }
 
+// Was: the legacy hub opened in mode new. Now: in a plain terminal Enter
+// with the hub in mode new; inside tmux Hub in mode new.
 func TestWorkWithoutBranchOpensSwitcherToNameAFeature(t *testing.T) {
 	t.Setenv("DEVTOOLS_ROOT", t.TempDir())
 	installFakeTmux(t)
-	called := false
-	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
-		called = true
-		if opts.Mode != hub.ModeNew {
-			t.Fatalf("mode = %v, want new", opts.Mode)
-		}
-		return nil, nil
-	})
+	scriptedTerminal(t, ordinaryTerminal)
+	r := &recordingMux{name: mux.Tmux}
+	useRecording(t, r)
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"work"}, &stdout, &stderr); code != 0 || !called {
-		t.Fatalf("work returned %d called=%v, stderr=%s", code, called, stderr.String())
+	if code := Run([]string{"work"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
 	}
+	wantCalls(t, r, fmt.Sprintf("Enter valid=true hub %d %q", hub.ModeNew, ""))
+
+	insideFakeTmux(t)
+	r = &recordingMux{name: mux.Tmux}
+	useRecording(t, r)
+	if code := Run([]string{"work"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("work returned %d, stderr=%s", code, stderr.String())
+	}
+	wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeNew, ""))
 }
 
+// Was: the legacy hub's Create made the feature from the directory of the
+// pane under a herdr popup (HERDR_ACTIVE_PANE_CWD). That variable is
+// dropped (4.5): the hub's "where you are" is the caller's directory. Now:
+// pick opens the hub, and the actions the backend is handed create the
+// feature from the worktree the hub was opened from, with git only.
 func TestSwitcherCreatesFeatureFromTheWorktreeYouAreIn(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
-	installFakeTmux(t)
 	t.Setenv("DEVTOOLS_ROOT", root)
+	installFakeTmux(t)
+	insideFakeTmux(t)
+	r := &recordingMux{name: mux.Tmux, showShown: mux.ShownInWindow}
+	useRecording(t, r)
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{"clone", remote, "widgets"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("clone returned %d, stderr=%s", code, stderr.String())
 	}
 	mainPath := filepath.Join(root, "widgets", "main")
-	t.Setenv("HERDR_ACTIVE_PANE_CWD", mainPath)
-	stubHub(t, func(opts hub.Options) (*hub.Item, error) {
-		if opts.Here != mainPath {
-			t.Fatalf("here = %q, want the pane's directory %q", opts.Here, mainPath)
-		}
-		item, err := opts.Backend.Create(hub.CreateRequest{
-			Root: root, Project: "widgets", Branch: "feature/api", From: "main", FromPath: mainPath,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return &item, nil
-	})
+	changeCwd(t, mainPath)
+	r = &recordingMux{name: mux.Tmux}
+	useRecording(t, r)
 	if code := Run([]string{"pick"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("pick returned %d, stderr=%s", code, stderr.String())
+	}
+	wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeAll, ""))
+	if r.deps.Actions == nil {
+		t.Fatal("the backend was handed no hub actions")
+	}
+	if _, err := r.deps.Actions.Create(hub.CreateRequest{
+		Root: root, Project: "widgets", Branch: "feature/api", From: "main", FromPath: mainPath,
+	}); err != nil {
+		t.Fatal(err)
 	}
 	featurePath := filepath.Join(root, "widgets", "feature-api")
 	if branch := strings.TrimSpace(gitOut(t, featurePath, "branch", "--show-current")); branch != "feature/api" {
 		t.Fatalf("branch = %q, want feature/api", branch)
 	}
+	wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeAll, ""))
 }
 
 func TestMergeRebasesSoMainOnlyFastForwards(t *testing.T) {
@@ -755,32 +773,6 @@ func TestMergeThatConflictsLeavesEverythingAsItWas(t *testing.T) {
 	}
 }
 
-func TestSessionPreviewFitsAllWindowsIntoPreviewHeight(t *testing.T) {
-	log := installFakeTmuxWithWindows(t, "@1\t1\tvim\n@2\t2\tserver logs", 10)
-	t.Setenv("FZF_PREVIEW_LINES", "8")
-	var stdout, stderr bytes.Buffer
-
-	if code := Run([]string{"session-preview", "work"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("session-preview returned %d, stderr=%s", code, stderr.String())
-	}
-	want := "\x1b[1m── 1: vim ──\x1b[0m\n" +
-		"@1 line 8\n@1 line 9\n@1 line 10\n" +
-		"\x1b[1m── 2: server logs ──\x1b[0m\n" +
-		"@2 line 8\n@2 line 9\n@2 line 10\n"
-	if stdout.String() != want {
-		t.Fatalf("preview output = %q, want %q", stdout.String(), want)
-	}
-	got := tmuxCommands(t, log)
-	wantCommands := []string{
-		"list-windows -t work -F #{window_id}\t#{window_index}\t#{window_name}",
-		"capture-pane -ep -t @1",
-		"capture-pane -ep -t @2",
-	}
-	if strings.Join(got, "\n") != strings.Join(wantCommands, "\n") {
-		t.Fatalf("tmux commands = %#v, want %#v", got, wantCommands)
-	}
-}
-
 func TestNukeDiscardsWorktreeChanges(t *testing.T) {
 	root := t.TempDir()
 	remote := createRemote(t)
@@ -839,7 +831,7 @@ func TestRemoveSwitchesToMainSessionBeforeRemovingFeature(t *testing.T) {
 	}
 	featurePath := filepath.Join(root, "widgets", "feature-test")
 	changeCwd(t, featurePath)
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	insideFakeTmux(t)
 	clearFile(t, log)
 	stdout.Reset()
 	stderr.Reset()
@@ -878,7 +870,7 @@ func TestRemoveMainDetachesBeforeRemovingSession(t *testing.T) {
 	}
 	mainPath := filepath.Join(root, "widgets", "main")
 	changeCwd(t, mainPath)
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	insideFakeTmux(t)
 	clearFile(t, log)
 	stdout.Reset()
 	stderr.Reset()
@@ -928,7 +920,7 @@ func TestMergeMergesCurrentWorktreeIntoMainAndRemovesIt(t *testing.T) {
 	gitCmd(t, featurePath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "feature")
 
 	changeCwd(t, featurePath)
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	insideFakeTmux(t)
 	clearFile(t, log)
 	stdout.Reset()
 	stderr.Reset()
@@ -1144,14 +1136,6 @@ func TestGitWorkflowCommandsOperateThroughCLI(t *testing.T) {
 	}
 }
 
-// stubHub replaces the switcher, which needs a terminal, with fn.
-func stubHub(t *testing.T, fn func(hub.Options) (*hub.Item, error)) {
-	t.Helper()
-	saved := runHub
-	runHub = fn
-	t.Cleanup(func() { runHub = saved })
-}
-
 // identity lets git commit and rebase in tests.
 func identity(t *testing.T) {
 	t.Helper()
@@ -1173,19 +1157,76 @@ func commitFile(t *testing.T, dir, name, content, message string) {
 	gitCmd(t, dir, "commit", "-m", message)
 }
 
+// fakeTmuxScript is the fake tmux of these tests. It records every call
+// in $TMUX_LOG, one per line, except the two display-message queries of
+// tmux.PaneTTY and tmux.Alive, which it answers without recording them: the
+// pane's terminal is $TMUX_PANE_TTY (by default a path that is no
+// terminal, so no test process matches it), the server's pid is the pid
+// field of $TMUX. It keeps the sessions it was asked to create detached in
+// $TMUX_LOG.sessions, so has-session answers yes for those and no for any
+// other, and kill-session forgets one. extra is shell code run after the
+// call is recorded.
+func fakeTmuxScript(extra string) string {
+	return "#!/bin/sh\n" +
+		"if [ \"$1\" = -S ]; then shift 2; fi\n" +
+		"if [ \"$1\" = display-message ]; then\n" +
+		"case \"$*\" in\n" +
+		"*'#{pane_tty}'*) printf '%s\\n' \"${TMUX_PANE_TTY:-/nonexistent/devtools-test-pane-tty}\";;\n" +
+		"*'#{pid}'*) rest=${TMUX%,*}; printf '%s\\n' \"${rest##*,}\";;\n" +
+		"esac\nexit 0\nfi\n" +
+		"printf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n" +
+		"state=\"$TMUX_LOG.sessions\"\n" +
+		"case \"$1\" in\n" +
+		"has-session) grep -qxF -- \"$3\" \"$state\" 2>/dev/null || { echo \"can't find session: $3\" >&2; exit 1; };;\n" +
+		"new-session) if [ \"$2\" = -d ]; then printf '%s\\n' \"$4\" >> \"$state\"; fi;;\n" +
+		"kill-session) if [ -e \"$state\" ]; then grep -vxF -- \"$3\" \"$state\" > \"$state.new\"; mv \"$state.new\" \"$state\"; fi;;\n" +
+		"esac\n" + extra
+}
+
 func installFakeTmux(t *testing.T) string {
+	t.Helper()
+	return installFakeTmuxScript(t, fakeTmuxScript(""))
+}
+
+func installFakeTmuxScript(t *testing.T, script string) string {
 	t.Helper()
 	bin := t.TempDir()
 	log := filepath.Join(t.TempDir(), "tmux.log")
 	fakeTmux := filepath.Join(bin, "tmux")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("TMUX_LOG", log)
 	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	// the colour profile is settled by the environment, as in a developer's
+	// terminal: with TMUX set and no COLORTERM (the build sandbox sets only
+	// TERM=xterm-256color) bubbletea's detection would ask the fake
+	// "tmux info", which the tests would count as a call of the backend
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("COLORTERM", "truecolor")
+	// since the cutover a plain terminal selects devtools by default: the
+	// fake's backend is named, so a command typed outside tmux uses it
+	t.Setenv("DEVTOOLS_MULTIPLEXER", "tmux")
 	return log
+}
+
+// insideFakeTmux runs devtools as if in a pane of a live tmux server: TMUX
+// names a socket that exists and TMUX_PANE a pane, which the fake tmux
+// knows (its display-message answers). The pane's terminal is not this
+// process's, so the one live mark decides: InTmux.
+func insideFakeTmux(t *testing.T) {
+	t.Helper()
+	socket := filepath.Join(t.TempDir(), "default")
+	if err := os.WriteFile(socket, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", socket+",4242,0")
+	t.Setenv("TMUX_PANE", "%1")
 }
 
 // installFakeHerdr runs devtools as if inside herdr, with the given
@@ -1219,6 +1260,7 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 		t.Fatal(err)
 	}
 	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", fakeHerdrSocket(t))
 	t.Setenv("HERDR_BIN_PATH", bin)
 	t.Setenv("HERDR_LOG", log)
 	t.Setenv("HERDR_WORKSPACES", workspaces)
@@ -1228,6 +1270,29 @@ func installFakeHerdr(t *testing.T, workspaces string) string {
 	return log
 }
 
+// fakeHerdrSocket listens on a unix socket in a short temp directory and
+// accepts and closes every connection, so the herdr mark of a test is live
+// (backend.Facts: something accepts a connection at HERDR_SOCKET_PATH).
+func fakeHerdrSocket(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(testkit.ShortTempDir(t), "herdr.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	t.Cleanup(func() { l.Close() })
+	return path
+}
+
 // installFakeHerdrOutside runs devtools in a plain terminal with herdr
 // installed, its server running once the returned marker file exists.
 func installFakeHerdrOutside(t *testing.T, workspaces string) (string, string) {
@@ -1235,7 +1300,11 @@ func installFakeHerdrOutside(t *testing.T, workspaces string) (string, string) {
 	log := installFakeHerdr(t, workspaces)
 	marker := filepath.Join(t.TempDir(), "running")
 	t.Setenv("HERDR_ENV", "")
+	t.Setenv("HERDR_SOCKET_PATH", "")
 	t.Setenv("HERDR_RUNNING", marker)
+	// since the cutover a plain terminal selects devtools by default: the
+	// fake's backend is named
+	t.Setenv("DEVTOOLS_MULTIPLEXER", "herdr")
 	return log, marker
 }
 
@@ -1263,35 +1332,8 @@ func readLog(t *testing.T, path string) string {
 
 func installFakeTmuxWithSessions(t *testing.T, sessions string) string {
 	t.Helper()
-	bin := t.TempDir()
-	log := filepath.Join(t.TempDir(), "tmux.log")
-	fakeTmux := filepath.Join(bin, "tmux")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\nif [ \"$1\" = \"list-sessions\" ]; then\nprintf '%s\\n' \"$TMUX_SESSIONS\"\nfi\n"
-	if err := os.WriteFile(fakeTmux, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("TMUX_LOG", log)
+	log := installFakeTmuxScript(t, fakeTmuxScript("if [ \"$1\" = \"list-sessions\" ]; then\nprintf '%s\\n' \"$TMUX_SESSIONS\"\nfi\n"))
 	t.Setenv("TMUX_SESSIONS", sessions)
-	t.Setenv("TMUX", "")
-	return log
-}
-
-func installFakeTmuxWithWindows(t *testing.T, windows string, paneLines int) string {
-	t.Helper()
-	bin := t.TempDir()
-	log := filepath.Join(t.TempDir(), "tmux.log")
-	fakeTmux := filepath.Join(bin, "tmux")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n" +
-		"if [ \"$1\" = \"list-windows\" ]; then\nprintf '%s\\n' \"$TMUX_WINDOWS\"\nfi\n" +
-		"if [ \"$1\" = \"capture-pane\" ]; then\ni=1\nwhile [ \"$i\" -le \"$TMUX_PANE_LINES\" ]; do\nprintf '%s line %s\\n' \"$4\" \"$i\"\ni=$((i+1))\ndone\nfi\n"
-	if err := os.WriteFile(fakeTmux, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("TMUX_LOG", log)
-	t.Setenv("TMUX_WINDOWS", windows)
-	t.Setenv("TMUX_PANE_LINES", strconv.Itoa(paneLines))
 	return log
 }
 

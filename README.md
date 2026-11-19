@@ -1,10 +1,26 @@
 # devtools
 
-`devtools` is a small Go CLI for managing development checkouts as Git worktrees and pairing each worktree with a session in a terminal multiplexer.
+`devtools` is a small Go CLI for managing development checkouts as Git worktrees, and the terminal multiplexer that pairs each worktree with a session.
 
-Sessions live in [herdr](https://herdr.dev) by default: each session is a herdr workspace labeled with the session name. Switching focuses it or creates it in the worktree, removing a worktree closes it, and `sessions` picks between the open workspaces. Inside a herdr pane this goes through the running herdr. From a plain terminal, devtools starts a herdr server in the background if none is running, focuses the workspace, and attaches the terminal to herdr, the way `tmux new-session -A` does.
+devtools is its own multiplexer: a server per machine keeps the sessions, their tabs and panes, and every terminal window is a client of it (`devtools attach`). The client draws a status row, has a key table and copy mode, and opens the hub, the switcher over every worktree, bookmark, session and agent, on this machine and on the other machines named in the [config](#configuration). A session on another machine is shown in the same window over `ssh <machine> devtools bridge`; nothing listens on the network.
 
-Inside tmux (`$TMUX` is set, including a tmux nested in herdr), sessions are tmux sessions instead. If herdr is not installed (neither `$HERDR_BIN_PATH` nor `herdr` on `PATH`), devtools falls back to tmux. To pick a multiplexer explicitly, set `DEVTOOLS_MULTIPLEXER=tmux` or `DEVTOOLS_MULTIPLEXER=herdr`, or add a `multiplexer` line to the [config file](#configuration). The environment variable wins over the config file, and both win over the `$TMUX` rule.
+Two other multiplexers can be used instead, through the same commands:
+
+- tmux, the fallback for when the devtools server is down: `DEVTOOLS_MULTIPLEXER=tmux devtools attach`.
+- herdr, for a machine that still has it installed.
+
+Each backend does what its multiplexer does natively and nothing more. A command or a part of the hub that needs a capability the backend lacks says so and exits with status 1, or is not shown; nothing is emulated:
+
+| Capability | devtools | tmux | herdr |
+| --- | --- | --- | --- |
+| `machines`: sessions of other machines, shown in this window | yes | no | no |
+| `agent-status`: the coding agents and their state, `devtools agents` | yes | no | yes |
+| `window`: the status row, the key table, copy mode, `devtools keys` | yes | no | no |
+| `pane-focus`: `devtools pane focus` | yes | no | no |
+| `layout`: `devtools session list --json`, `devtools pane list --json` | yes | no | no |
+| `detached-open`: open a session that no window shows | yes | yes | no |
+
+Which backend a command uses: inside a devtools, tmux or herdr pane, that multiplexer; a `DEVTOOLS_MULTIPLEXER` that names another one is refused. Elsewhere `DEVTOOLS_MULTIPLEXER` (`devtools`, `tmux` or `herdr`), then the `multiplexer` line of the config, then devtools. A backend that is not available is an error that says so; devtools never falls back to another one on its own. No multiplexer is ever started inside another.
 
 By default it uses `~/dev` as the workspace root. Multiple roots can be configured; projects are discovered across all of them. Roots come from, in order of precedence:
 
@@ -17,25 +33,21 @@ The first root is the primary root: `new` and `clone` create projects there. All
 
 ## Requirements
 
-- Go 1.26 or newer
+- Go 1.26 or newer, with cgo: the terminal engine is libghostty-vt, which the Nix dev shell provides
 - Git
-- herdr or tmux: herdr is the default, tmux is used inside tmux or when herdr is not installed
-- fzf, for `devtools agents`, `devtools machines` and `devtools sessions --machine`
+- ssh, for other machines
+- tmux or herdr, only to use them as the backend
 - Nix, optional, for the provided dev shell and package build
 
 ## Install
 
-Run from this repository:
-
-```sh
-go install ./cmd/devtools
-```
-
-Or build with Nix:
+Build with Nix:
 
 ```sh
 nix build
 ```
+
+The flake also has a home-manager module, `programs.devtools`, which writes the config and runs `devtools server` as a user service (`devtools-server` under systemd, launchd on macOS).
 
 ## Usage
 
@@ -46,11 +58,12 @@ devtools [--root PATH]... <command> [args]
 Commands:
 
 ```sh
+devtools attach
 devtools new <project-name>
 devtools clone <repo-url> [project-name]
 devtools migrate [--allow-dirty] [path]
 devtools work [branch] [--from <start-point>]
-devtools merge
+devtools merge [--squash]
 devtools update [--all]
 devtools push
 devtools rebase [--onto <base>]
@@ -59,11 +72,13 @@ devtools list
 devtools status [--all]
 devtools switch [path-or-query]
 devtools pick
-devtools sessions [--machine <label-or-id>]
-devtools agents [--machine <label-or-id>]
-devtools machines
-devtools serve [--name <name>] [--ssh <destination>] [--listen <addr>]
-devtools hosts
+devtools sessions
+devtools agents [--json]
+devtools keys
+devtools session list --json
+devtools pane list --json
+devtools pane focus --direction left|right|up|down
+devtools server [status [--json] | restart [--yes]]
 devtools bookmark add <name> [path]
 devtools bookmark remove <name>
 devtools bookmark list
@@ -94,7 +109,7 @@ Feature branches are converted to filesystem-safe worktree names, so `feature/ex
 
 ## The switcher
 
-`devtools pick`, `devtools switch` without a target, `devtools sessions` and `devtools work` without a branch open the switcher: one list of every worktree, bookmark and open workspace.
+`devtools pick`, `devtools switch` without a target, `devtools sessions` and `devtools work` without a branch open the switcher, the hub: one list of every worktree, bookmark and open session. In a devtools window it opens over the window, the prefix key (`ctrl+space`) and `o` open it too; in tmux and herdr it runs in the pane or popup the command was typed in; from a plain terminal the window starts with it open.
 
 ```text
   › Switch to a worktree, or name a new feature
@@ -109,7 +124,7 @@ Feature branches are converted to filesystem-safe worktree names, so `feature/ex
   ⏎ switch   ⌃N new feature   ⌃G merge into main   tab open only
 ```
 
-Each project is one row, standing for its main worktree, with its feature worktrees indented below. The marked row is where you are: the directory of the pane under a herdr popup, or the current directory. The columns are uncommitted changes, how far the branch is ahead of and behind its upstream, and the state of its workspace: `open`, or what its agent is doing (`working`, `idle`, `done`, `needs you`) followed by the agent's terminal title. A clean, pushed worktree without a workspace shows nothing.
+Each project is one row, standing for its main worktree, with its feature worktrees indented below. The marked row is where you are: the current directory. The columns are uncommitted changes, how far the branch is ahead of and behind its upstream, and the state of its session: `open`, or what its agent is doing (`working`, `idle`, `done`, `needs you`) followed by the agent's terminal title. A clean, pushed worktree without a session shows nothing.
 
 Typing filters the list the way fzf does. When the text names no existing worktree, it can become a feature: the last row offers `New feature <name> in <project>, from <worktree>`, branching from the worktree you are in, and enter on it creates the worktree and switches to it. Spaces become dashes. Prefix the name with a project, `xcloud/fix-login`, to start it in another project from its main worktree.
 
@@ -119,77 +134,25 @@ Keys:
 - `↑` `↓` or `ctrl+k` `ctrl+j` move
 - `ctrl+n` creates the feature named by the text
 - `ctrl+g` merges the selected feature into main, after asking, like `devtools merge`
-- `tab` shows only open workspaces, or all again
+- `tab` cycles all, open sessions only and, with `agent-status`, the agents
 - `esc` clears the text, then closes
 
-`devtools sessions` opens it on the open workspaces only, and `devtools work` without a branch opens it to name a feature in the current project.
+`devtools sessions` opens it on the open sessions only, `devtools agents` on the agents, and `devtools work` without a branch opens it to name a feature in the current project.
 
-The projects on [your other machines](#other-machines) show below this machine's, each machine under its name, as soon as it answers. Typing a machine's name lists what is on it, `macmini xcl` say.
+On the devtools backend the projects and sessions of [your other machines](#other-machines) show below this machine's, each machine under its name, as soon as it answers. Typing a machine's name lists what is on it, `macmini xcl` say. On tmux and herdr the hub lists this machine only.
 
 ## Other machines
 
-When you work on several machines, the switcher lists the projects on all of them, wherever you open it. Every machine runs `devtools serve`. When the switcher opens, it broadcasts a query on the local network, and each machine that is awake answers with its worktrees, their git state and its open sessions. A machine that is asleep or switched off just doesn't answer, and its projects don't show. Finding the other machines needs no login. The answers only report what is there, and nothing on the network can change anything through them.
+Other machines exist only as `machine` lines of the [config](#configuration), by ssh host alias:
 
-Switching to a project on another machine goes over ssh, so that is the one moment ssh asks you to log in, a 1Password prompt say. devtools runs `devtools session-open` on that machine, which focuses the project's session there or creates it, the same way `switch` would on that machine. How you land in that session depends on where you opened the switcher, and a multiplexer never opens inside another:
-
-- From a plain terminal, ssh runs in the terminal and attaches to the session over there.
-- Inside herdr, the herdr window itself switches to the project's workspace on that machine, the way clicking it in the sidebar would. devtools saves the machine in herdr first if herdr doesn't know it yet (`herdr machine add <ssh destination> --label <name>`, matched by label or ssh target afterwards), turns it back on if it is disabled, and creates or focuses the workspace over there through herdr. The machine must keep its sessions in herdr, with its server running.
-
-  Switching the window needs a herdr client with the activation request patch, in the systems repo as `modules/home-manager/herdr-activate-request.patch`: herdr's socket API reaches a server, never the client that picks which machine a window shows. devtools writes the machine's profile id and the workspace id to `activate-request.json` in the client state directory (`${XDG_STATE_HOME:-~/.local/state}/herdr/client`). Every client on this machine says it received the request, waits until the machine is connected, for a machine saved a moment ago, then shows the workspace and says it is done. A window whose client predates the patch, one started before the update, can't switch machines: it gets a notification saying where the workspace is open. Switching to a project on this machine while the window shows another machine brings it back to Local the same way.
-- Inside tmux, the tmux client gives way to ssh (`tmux detach-client -E`): the terminal leaves the tmux session, which keeps running, and attaches to the session over there.
-
-Features can't be started on another machine or merged from here; run devtools over there for that.
-
-### Setting up a machine
-
-Run `devtools serve` on each machine as a user service, so it starts at login. It needs `git` and `herdr` or `tmux` on its `PATH`, and the same config as your terminal (roots, bookmarks, multiplexer).
-
-```sh
-devtools serve --name macmini
+```text
+machine macmini connect
+machine macbook
 ```
 
-`--name` is what the switcher calls the machine; it defaults to the short hostname. `--ssh` is the ssh destination other machines use to reach it, and defaults to the name, so an ssh config `Host macmini` entry is all a client needs. The ssh destination must have `devtools` on the `PATH` of a non-interactive shell.
+The devtools client reaches a machine by running `ssh -T <alias> devtools bridge`, which connects to the devtools server over there; ssh allocates no terminal and nothing listens on the network. A machine with `connect` is connected while the client runs; one without it is connected when the hub opens or a switch goes there, and let go of 10 minutes after it is no longer shown. Picking a session of another machine in the hub shows it in this window, and the status row names the machine. A machine that does not answer stays in the hub under its name, with the reason.
 
-NixOS, with home-manager, in `systemd.user.services`:
-
-```nix
-devtools-serve = {
-  Unit.Description = "devtools serve";
-  Install.WantedBy = [ "default.target" ];
-  Service = {
-    ExecStart = "${devtools}/bin/devtools serve --name desktop";
-    # herdr: however you install herdr
-    Environment = [ "PATH=${lib.makeBinPath [ pkgs.git herdr ]}" ];
-    Restart = "on-failure";
-  };
-};
-```
-
-And let the other machines in: `networking.firewall.allowedUDPPorts = [ 47390 ];` and `networking.firewall.allowedTCPPorts = [ 47390 ];`.
-
-macOS, with nix-darwin, in `launchd.user.agents`:
-
-```nix
-devtools-serve.serviceConfig = {
-  ProgramArguments = [ "${devtools}/bin/devtools" "serve" "--name" "macmini" ];
-  EnvironmentVariables.PATH = "${lib.makeBinPath [ pkgs.git herdr ]}:/usr/bin:/bin";
-  RunAtLoad = true;
-  KeepAlive = true;
-  StandardErrorPath = "/tmp/devtools-serve.log";
-};
-```
-
-On macOS, the application firewall, if on, asks once whether `devtools` may accept incoming connections, and the terminal you run `devtools` in may ask for Local Network access the first time the switcher broadcasts.
-
-`devtools hosts` lists every machine that answered, this one included, with its address and how long it took, or why it couldn't be read. Start there when a machine doesn't show up.
-
-### Machines a broadcast doesn't reach
-
-A broadcast stays on the local network. Add a `peer` line to the [config](#configuration) for each machine to ask directly as well, across a VPN say. Queries and snapshots use UDP and TCP port 47390, which `port` changes on every machine at once.
-
-### What the network sees
-
-`devtools serve` answers anyone on a private network (10/8, 172.16/12, 192.168/16, link-local, the 100.64/10 range Tailscale uses, and the loopback) and refuses everyone else. Whoever can reach it sees your project names, paths, branch state and agent titles, without logging in, so run it on networks you trust. The answers can't make devtools run anything here: devtools passes ssh only a destination that can't be read as an option, quotes everything it sends to the other machine, and drops control characters from everything it draws. Set `discovery off` in the config to keep devtools from broadcasting at all.
+Nothing received from another machine adds, renames or removes a machine, and everything it sends is drawn without its control characters. Only the devtools backend has other machines; tmux and herdr show this machine only.
 
 ## Commands
 
@@ -307,7 +270,7 @@ devtools switch repo/main
 devtools switch feature-api
 ```
 
-If no target is provided, or if a query matches multiple worktrees, [the switcher](#the-switcher) opens, with the query typed in. So does a query that matches nothing here, unless discovery is off, so the switcher can find it on [another machine](#other-machines).
+If no target is provided, or if a query matches multiple worktrees, [the switcher](#the-switcher) opens, with the query typed in. A query that matches nothing here is an error.
 
 ### `pick`
 
@@ -317,39 +280,49 @@ Opens [the switcher](#the-switcher).
 devtools pick
 ```
 
+### `attach`
+
+Turns this terminal into a window of the multiplexer. From a plain terminal it shows the session shown last, or the switcher; inside a window it opens the switcher instead and says that you are already inside. A terminal that is itself inside a multiplexer, also over ssh, is refused rather than nesting one multiplexer in another.
+
+```sh
+devtools attach
+DEVTOOLS_MULTIPLEXER=tmux devtools attach
+```
+
 ### `sessions`
 
-Opens [the switcher](#the-switcher) on the open herdr workspaces, or the tmux sessions with the tmux multiplexer, including the ones devtools did not create; `tab` shows every worktree again.
-
-With `--machine`, it picks a workspace on a saved herdr SSH machine (see `herdr machine list`) instead. `--machine` requires the herdr multiplexer.
+Opens [the switcher](#the-switcher) on the open sessions, including the ones devtools did not create; `tab` shows every worktree again.
 
 ```sh
 devtools sessions
-devtools sessions --machine workbox
 ```
 
 ### `agents`
 
-Opens an interactive picker for the coding agents herdr recognizes, showing each one's workspace, kind, status, and terminal title. Agents that need attention come first: blocked, done, idle, working, then unknown. The preview shows the agent's screen. Selecting an agent focuses it; from a plain terminal, devtools then attaches to herdr. With `--machine`, it lists the agents on a saved herdr SSH machine.
+Opens [the switcher](#the-switcher) on the coding agents of every machine, the ones that need attention first: blocked, done, idle, working. Picking one shows its pane. `--json` prints one object per line for each agent of this machine. Needs `agent-status`: devtools or herdr.
 
 ```sh
 devtools agents
-devtools agents --machine workbox
+devtools agents --json
 ```
 
-### `machines`
+### `keys`
 
-Opens an interactive picker for the saved herdr SSH machines, previewing each one's workspaces, then the workspace picker for the selected machine. From a plain terminal, devtools attaches to the machine's herdr over SSH (`herdr --remote`). Inside herdr, it focuses the workspace on the machine, but herdr can't switch the machine the window shows from the CLI, so select the machine in the herdr sidebar to see it.
+Prints every key binding of the devtools window, of the switcher and of copy mode after the `bind` and `unbind` lines of the config were applied. The prefix key is `ctrl+space`; `prefix ?` shows the bindings in the window.
 
-```sh
-devtools machines
-```
+### `session list`, `pane list`, `pane focus`
+
+`devtools session list --json` and `devtools pane list --json` print one object per line for each session or pane of the devtools server. `devtools pane focus --direction left|right|up|down` moves the focus to the neighbouring pane of the pane it runs in: exit 0 moved, 1 no pane that way, 2 an error; editors use it for navigation across panes.
+
+### `server`
+
+`devtools server` is the server; the service manager runs it. `devtools server status` says whether it runs (exit 0) or not (exit 1, with the command that starts it); `devtools server restart` restarts the service, after asking when programs are running in it (`--yes` does not ask). A session survives a restart as its directory and layout; the programs in it start again.
 
 ### `bookmark`
 
 Manages named bookmarks for directories that do not follow the managed bare-worktree layout, like a dotfiles checkout or a notes directory. Bookmarks show up in `list`, `switch`, and `pick` alongside discovered worktrees, and their session is named after the bookmark.
 
-`add` stores the given path, or the current directory when the path is omitted. Bookmarks are stored in the config file.
+`add` stores the given path, or the current directory when the path is omitted. Bookmarks are stored in the local config file.
 
 ```sh
 devtools bookmark add dotfiles ~/.dotfiles
@@ -359,26 +332,9 @@ devtools bookmark remove notes
 devtools switch dotfiles
 ```
 
-### `serve`
-
-Answers devtools on the other machines with this machine's projects and sessions, until stopped. Run it as a user service on every machine, see [Setting up a machine](#setting-up-a-machine). `--listen` picks the address, every address at the config `port` by default.
-
-```sh
-devtools serve --name desktop
-devtools serve --name macbook --ssh florian@macbook.local
-```
-
-### `hosts`
-
-Lists the machines that answer, this one included, each with its address, its ssh destination, and how many items it sent in how long, or why it couldn't be read.
-
-```sh
-devtools hosts
-```
-
 ## Configuration
 
-devtools reads an optional config file from `$DEVTOOLS_CONFIG`, falling back to `$XDG_CONFIG_HOME/devtools/config` and then `~/.config/devtools/config`. The format is line-based; blank lines and lines starting with `#` are ignored:
+devtools reads two config files with one grammar: `$DEVTOOLS_CONFIG`, falling back to `$XDG_CONFIG_HOME/devtools/config` and then `~/.config/devtools/config` (home-manager writes this one), and then the same path with `.local` appended, which `devtools bookmark` writes. The format is line-based; blank lines and lines starting with `#` are ignored, and an unknown directive or a malformed line is an error that names the file and the line:
 
 ```text
 # workspace roots, searched in order; the first is the primary root
@@ -389,23 +345,22 @@ root ~/work
 bookmark dotfiles ~/.dotfiles
 bookmark notes ~/Documents/notes
 
-# always use tmux, or herdr, regardless of $TMUX
-multiplexer tmux
+# the backend outside a multiplexer: devtools (the default), tmux or herdr
+multiplexer devtools
 
-# machines to ask directly, besides the ones a broadcast finds
-peer 100.101.102.103
-peer macbook.tailnet.ts.net:47390
+# other machines, by ssh host alias; connect keeps the connection
+machine macmini connect
+machine macbook
 
-# the UDP and TCP port of devtools serve, the same on every machine
-port 47390
+# key bindings of the devtools window
+bind prefix+f hub new
+unbind prefix+q
 
-# never look for other machines
-discovery off
+# one of the colour tokens strong, muted, raised, selection, warning: light, dark
+color selection #d0e0ff #304060
 ```
 
-`root` lines are used only when neither `--root` nor `DEVTOOLS_ROOT` is set. `bookmark` lines are managed by `devtools bookmark add` and `devtools bookmark remove`, but can also be edited by hand. `multiplexer` is overridden by `DEVTOOLS_MULTIPLEXER`.
-
-`peer`, `port` and `discovery` are about [other machines](#other-machines). Discovery is on by default; `devtools serve` reads `port` too, so keep it the same on every machine.
+`root` lines are used only when neither `--root` nor `DEVTOOLS_ROOT` is set. `bookmark` lines are managed by `devtools bookmark add` and `devtools bookmark remove`, but can also be edited by hand. `multiplexer` is overridden by `DEVTOOLS_MULTIPLEXER` and is not read inside a multiplexer. A line a backend has no use for (`machine` on tmux, `bind` on herdr) is read and ignored, so one config serves every backend.
 
 ## Development
 

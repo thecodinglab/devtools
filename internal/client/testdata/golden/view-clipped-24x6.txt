@@ -1,0 +1,7 @@
+size 24x6 cursor 0,0 visible
+left 0123456789|right pa|
+left row 1     |right ro|
+               <|
+               ||
+               ||
+ desktop  devtools-main|

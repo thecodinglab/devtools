@@ -1,0 +1,2 @@
+size 30x1 cursor 0,0 hidden
+       Window too small|

@@ -1,0 +1,1 @@
+tmux cannot show devtools key bindings. A devtools window can.

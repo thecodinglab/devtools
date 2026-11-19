@@ -1,0 +1,2 @@
+This terminal looks like it is inside both tmux and herdr.
+devtools cannot tell which one, so it did nothing.

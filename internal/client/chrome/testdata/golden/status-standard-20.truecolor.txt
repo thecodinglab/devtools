@@ -1,0 +1,7 @@
+size 20x1 cursor 0,0 hidden
+ 2 cla… ◆  +2   ◆ 1|
+styles
+0 1 6 bold p4
+0 8 1 #ec8a3f
+0 11 2 p8
+0 16 3 #ec8a3f

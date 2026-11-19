@@ -1,0 +1,25 @@
+size 80x24 cursor 4,0 visible
+  › Switch to a worktree, or name a new feature                  all  sessions|
+|
+  devtools|
+▎   main            3 changed    ↑2     open|
+    replace-herdr                       open|
+    fix-footer      1 changed           open|
+  systems|
+    main            12 changed   ↓1     open|
+  notes|
+    main|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+  ⏎ switch   ⌃N new feature   tab sessions   esc close|

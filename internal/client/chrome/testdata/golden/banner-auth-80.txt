@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ macmini  ✗ ssh could not log in. Run ssh macmini once in a shell.|

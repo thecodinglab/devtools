@@ -1,0 +1,1 @@
+Opened devtools-main. No window shows this pane, so nothing was switched.

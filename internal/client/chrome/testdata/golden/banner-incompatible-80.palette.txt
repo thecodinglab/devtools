@@ -1,0 +1,8 @@
+size 80x1 cursor 0,0 hidden
+ macmini  ✗ incompatible. Update devtools on macmini. Typing is paused.|
+styles
+0 0 1 reverse
+0 1 7 bold reverse
+0 8 2 reverse
+0 10 1 bold reverse
+0 11 69 reverse

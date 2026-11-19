@@ -1,0 +1,1 @@
+tmux cannot list sessions and panes as JSON. A devtools window can.

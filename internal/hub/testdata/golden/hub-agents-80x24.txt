@@ -1,0 +1,24 @@
+size 80x23 cursor 4,0 visible
+  › Jump to an agent                                     all  sessions  agents|
+|
+▎ ◆ needs you   desktop   devtools-main            2 claude   Fix the hub foo…|
+  ✓ done        macmini   devtools-main            1 claude   Review PR 212|
+  ● working     desktop   devtools-replace-herdr   2 claude   Plan part 4|
+  ● working     macmini   blog-main                1 codex    Draft the post|
+  ○ idle        desktop   systems-main             3 claude|
+|
+  macbook   connecting…|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+  ⏎ jump to pane   tab all   esc close|

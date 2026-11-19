@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ macmini  notes-main   1 zsh  2 claude ●        macmini   ◆ 1  ✓ 1  ● 2   14:32|

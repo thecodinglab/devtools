@@ -1,0 +1,6 @@
+size 20x1 cursor 0,0 hidden
+ macmini  not reac…|
+styles
+0 0 1 on #30323a
+0 1 7 bold #e6e7eb on #30323a
+0 8 12 on #30323a

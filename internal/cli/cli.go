@@ -8,17 +8,16 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 
+	"devtools/internal/backend"
 	"devtools/internal/config"
 	"devtools/internal/devgit"
 	"devtools/internal/discovery"
-	"devtools/internal/herdr"
 	"devtools/internal/hub"
 	"devtools/internal/mux"
-	"devtools/internal/tmux"
+	"devtools/internal/session"
 	"devtools/internal/ui"
 
 	"github.com/spf13/cobra"
@@ -37,6 +36,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	cmd := newRootCommand(stdout, stderr)
 	cmd.SetArgs(args)
 	if err := cmd.Execute(); err != nil {
+		var e *exit
+		if errors.As(err, &e) {
+			if e.text != "" {
+				fmt.Fprintln(stderr, e.text)
+			}
+			return e.code
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -46,47 +52,58 @@ func Run(args []string, stdout, stderr io.Writer) int {
 type app struct {
 	roots  []string
 	stdout io.Writer
+	stderr io.Writer
+	picked *picked // the multiplexer of this command, once multiplexer() found it
+}
+
+// picked is what multiplexer() found: the backend and where the command runs.
+type picked struct {
+	m mux.Multiplexer
+	c mux.Context
 }
 
 func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
-	a := &app{stdout: stdout}
+	a := &app{stdout: stdout, stderr: stderr}
 	cmd := &cobra.Command{
 		Use:           "devtools [--root PATH]... <command> [args]",
-		Short:         "Manage dev worktrees and their herdr or tmux sessions",
+		Short:         "Manage dev worktrees and their sessions",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
+		},
+		// the feature gate (gate.go) runs before every command
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return a.gate(cmd)
 		},
 	}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
 	cmd.PersistentFlags().StringArrayVar(&a.roots, "root", nil, "workspace root (repeatable; overrides DEVTOOLS_ROOT and config roots)")
 	cmd.AddCommand(
-		newProjectCommand(a, stdout),
-		cloneCommand(a, stdout),
-		migrateCommand(a, stdout),
-		newWorktreeCommand(a, stdout),
-		mergeCommand(a, stdout),
+		feature(featWork, newProjectCommand(a, stdout)),
+		feature(featWork, cloneCommand(a, stdout)),
+		feature(featWork, migrateCommand(a, stdout)),
+		feature(featWork, newWorktreeCommand(a, stdout)),
+		feature(featMerge, mergeCommand(a, stdout)),
 		updateCommand(a, stdout),
 		pushCommand(stdout),
 		rebaseCommand(a, stdout),
 		nukeCommand(stdout),
-		removeWorktreeCommand(a, stdout),
+		feature(featMerge, removeWorktreeCommand(a, stdout)),
 		listCommand(a, stdout),
 		statusCommand(a, stdout),
-		switchCommand(a),
-		pickCommand(a),
-		bookmarkCommand(a, stdout),
-		sessionsCommand(a, stdout),
-		sessionPreviewCommand(a, stdout),
-		agentsCommand(stdout),
-		agentPreviewCommand(stdout),
-		machinesCommand(stdout),
-		machinePreviewCommand(stdout),
-		serveCommand(a, stderr),
-		hostsCommand(stdout),
-		sessionOpenCommand(a),
+		feature(featWork, switchCommand(a)),
+		feature(featPick, pickCommand(a)),
+		feature(featBookmark, bookmarkCommand(a, stdout)),
+		feature(featSessions, sessionsCommand(a)),
+		attachCommand(a, stdout),
+		agentsCommand(a, stdout),
+		keysCommand(a, stdout),
+		sessionCommand(a, stdout),
+		paneCommand(a, stdout),
+		serverCommand(a, stdout),
+		bridgeCommand(),
 	)
 	return cmd
 }
@@ -230,6 +247,9 @@ func newProjectCommand(a *app, stdout io.Writer) *cobra.Command {
 		Short: "Create a new project",
 		Args:  usageExactArgs(1, "usage: devtools new <project-name>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, _, err := a.multiplexer(); err != nil {
+				return err
+			}
 			g, err := a.globals()
 			if err != nil {
 				return err
@@ -239,7 +259,8 @@ func newProjectCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.ProjectPath)
-			return a.switchSession(result.ProjectPath, tmux.SessionName(result.Project, result.Worktree))
+			_, err = a.show(result.ProjectPath, session.Name(result.Project, result.Worktree))
+			return err
 		},
 	}
 }
@@ -250,6 +271,9 @@ func cloneCommand(a *app, stdout io.Writer) *cobra.Command {
 		Short: "Clone a repository into the workspace",
 		Args:  usageArgRange(1, 2, "usage: devtools clone <repo-url> [project-name]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, _, err := a.multiplexer(); err != nil {
+				return err
+			}
 			g, err := a.globals()
 			if err != nil {
 				return err
@@ -263,7 +287,8 @@ func cloneCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return a.switchSession(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
+			_, err = a.show(result.WorktreePath, session.Name(result.Project, result.Worktree))
+			return err
 		},
 	}
 }
@@ -275,6 +300,9 @@ func migrateCommand(a *app, stdout io.Writer) *cobra.Command {
 		Short: "Migrate an existing checkout",
 		Args:  usageMaximumArgs(1, "usage: devtools migrate [--allow-dirty] [path]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, _, err := a.multiplexer(); err != nil {
+				return err
+			}
 			path := "."
 			if len(args) == 1 {
 				path = args[0]
@@ -288,7 +316,8 @@ func migrateCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return a.switchSession(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
+			_, err = a.show(result.WorktreePath, session.Name(result.Project, result.Worktree))
+			return err
 		},
 	}
 	cmd.Flags().BoolVar(&allowDirty, "allow-dirty", false, "allow migrating a dirty checkout")
@@ -306,7 +335,10 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 				if from != "" {
 					return errors.New("usage: devtools work <branch> --from <start-point>")
 				}
-				return a.openHub(hub.ModeNew, "")
+				return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeNew}})
+			}
+			if _, _, err := a.multiplexer(); err != nil {
+				return err
 			}
 			g, err := a.globals()
 			if err != nil {
@@ -332,7 +364,8 @@ func newWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(stdout, result.WorktreePath)
-			return a.switchSession(result.WorktreePath, tmux.SessionName(result.Project, result.Worktree))
+			_, err = a.show(result.WorktreePath, session.Name(result.Project, result.Worktree))
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "start point")
@@ -346,6 +379,9 @@ func mergeCommand(a *app, stdout io.Writer) *cobra.Command {
 		Short: "Merge the current worktree into main and remove it",
 		Args:  usageNoArgs("usage: devtools merge [--squash]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, _, err := a.multiplexer(); err != nil {
+				return err
+			}
 			g, err := a.globals()
 			if err != nil {
 				return err
@@ -382,11 +418,15 @@ func (a *app) mergeWorktree(root, project, worktree string, squash bool) (devgit
 	if err != nil {
 		return devgit.MergeResult{}, nil, err
 	}
+	m, _, err := a.multiplexer()
+	if err != nil {
+		return devgit.MergeResult{}, nil, err
+	}
 	restoreHangup := ignoreHangup()
-	closeSession, err := a.closeForRemoval(
-		tmux.SessionName(result.Project, result.Worktree),
-		tmux.SessionName(result.Project, result.MainWorktree),
+	closeSession, err := m.Leave(
+		result.WorktreePath,
 		result.MainWorktreePath,
+		session.Name(result.Project, result.MainWorktree),
 	)
 	if err != nil {
 		restoreHangup()
@@ -555,6 +595,10 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 		Short: "Remove a worktree",
 		Args:  usageMaximumArgs(1, "usage: devtools done [worktree] [--force] [--keep-branch] [--allow-main]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			m, _, err := a.multiplexer()
+			if err != nil {
+				return err
+			}
 			g, err := a.globals()
 			if err != nil {
 				return err
@@ -582,10 +626,10 @@ func removeWorktreeCommand(a *app, stdout io.Writer) *cobra.Command {
 			fallbackWorktree, fallbackPath := removalFallback(root, project, plan.Worktree)
 			restoreHangup := ignoreHangup()
 			defer restoreHangup()
-			closeSession, err := a.closeForRemoval(
-				tmux.SessionName(plan.Project, plan.Worktree),
-				tmux.SessionName(plan.Project, fallbackWorktree),
+			closeSession, err := m.Leave(
+				plan.WorktreePath,
 				fallbackPath,
+				session.Name(plan.Project, fallbackWorktree),
 			)
 			if err != nil {
 				return err
@@ -777,6 +821,9 @@ func switchCommand(a *app) *cobra.Command {
 		Short: "Switch to a worktree session",
 		Args:  usageMaximumArgs(1, "usage: devtools switch [path-or-query]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, _, err := a.multiplexer(); err != nil {
+				return err
+			}
 			g, err := a.globals()
 			if err != nil {
 				return err
@@ -786,22 +833,19 @@ func switchCommand(a *app) *cobra.Command {
 				return err
 			}
 			if len(args) == 0 {
-				return a.openHub(hub.ModeAll, "")
+				return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeAll}})
 			}
 			targets = withBookmarks(targets, g.bookmarks)
 			matches, err := discovery.ResolveMatches(targets, args[0])
 			if err != nil {
-				// what is not here may be on another machine
-				if args[0] != "" && remoteQueryFallback() {
-					return a.openHubWith(g, targets, args[0])
-				}
 				return err
 			}
 			if len(matches) > 1 {
-				return a.openHubWith(g, targets, args[0])
+				return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeAll, Query: args[0]}})
 			}
 			target := matches[0]
-			return a.switchSession(target.Path, tmux.SessionName(target.Project, target.Worktree))
+			_, err = a.show(target.Path, session.Name(target.Project, target.Worktree))
+			return err
 		},
 	}
 }
@@ -812,130 +856,9 @@ func pickCommand(a *app) *cobra.Command {
 		Short: "Open the switcher",
 		Args:  usageNoArgs("usage: devtools pick"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.openHub(hub.ModeAll, "")
+			return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeAll}})
 		},
 	}
-}
-
-func sessionPreviewCommand(a *app, stdout io.Writer) *cobra.Command {
-	var machine string
-	cmd := &cobra.Command{
-		Use:    "session-preview <session>",
-		Short:  "Render the fzf preview for a tmux session or herdr workspace",
-		Hidden: true,
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return errors.New("usage: devtools session-preview [--machine <label-or-id>] <session>")
-			}
-			return nil
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			backend := mux.Herdr
-			if machine == "" {
-				var err error
-				if backend, err = a.multiplexer(); err != nil {
-					return err
-				}
-			}
-			var sections []previewSection
-			var err error
-			if backend == mux.Herdr {
-				sections, err = workspacePreviewSections(herdr.Client{Machine: machine}, args[0])
-			} else {
-				sections, err = windowPreviewSections(args[0])
-			}
-			if err != nil {
-				return err
-			}
-			height := previewHeight()
-			for i, section := range sections {
-				lines := height / len(sections)
-				if i < height%len(sections) {
-					lines++
-				}
-				if lines < 1 {
-					break
-				}
-				fmt.Fprintf(stdout, "\x1b[1m── %s ──\x1b[0m\n", section.title)
-				content, err := section.capture()
-				if err != nil {
-					return err
-				}
-				for _, line := range tailLines(content, lines-1) {
-					fmt.Fprintln(stdout, line)
-				}
-			}
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&machine, "machine", "", "saved herdr machine")
-	return cmd
-}
-
-// previewSection is a tmux window or herdr tab in the session preview.
-type previewSection struct {
-	title   string
-	capture func() (string, error)
-}
-
-func workspacePreviewSections(client herdr.Client, workspace string) ([]previewSection, error) {
-	tabs, err := client.ListTabs(workspace)
-	if err != nil {
-		return nil, err
-	}
-	panes, err := client.TabPanes(workspace)
-	if err != nil {
-		return nil, err
-	}
-	sections := make([]previewSection, 0, len(tabs))
-	for _, tab := range tabs {
-		tabPanes := panes[tab.ID]
-		sections = append(sections, previewSection{
-			title: fmt.Sprintf("%d: %s", tab.Number, tab.Label),
-			capture: func() (string, error) {
-				if len(tabPanes) == 0 {
-					return "", nil
-				}
-				return client.CapturePane(tabPanes[0])
-			},
-		})
-	}
-	return sections, nil
-}
-
-func windowPreviewSections(session string) ([]previewSection, error) {
-	windows, err := tmux.ListWindows(session)
-	if err != nil {
-		return nil, err
-	}
-	sections := make([]previewSection, 0, len(windows))
-	for _, window := range windows {
-		sections = append(sections, previewSection{
-			title: fmt.Sprintf("%d: %s", window.Index, window.Name),
-			capture: func() (string, error) {
-				return tmux.CapturePane(window.ID)
-			},
-		})
-	}
-	return sections, nil
-}
-
-func previewHeight() int {
-	if lines, err := strconv.Atoi(os.Getenv("FZF_PREVIEW_LINES")); err == nil && lines > 0 {
-		return lines
-	}
-	return 40
-}
-
-func tailLines(content string, max int) []string {
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) > max {
-		lines = lines[len(lines)-max:]
-	}
-	return lines
 }
 
 func bookmarkCommand(a *app, stdout io.Writer) *cobra.Command {
@@ -1025,70 +948,135 @@ func bookmarkListCommand(a *app, stdout io.Writer) *cobra.Command {
 	}
 }
 
-func sessionsCommand(a *app, stdout io.Writer) *cobra.Command {
-	var machine string
-	cmd := &cobra.Command{
+func sessionsCommand(a *app) *cobra.Command {
+	return &cobra.Command{
 		Use:   "sessions",
-		Short: "Open the switcher on the open workspaces",
-		Args:  usageNoArgs("usage: devtools sessions [--machine <label-or-id>]"),
+		Short: "Open the switcher on the open sessions",
+		Args:  usageNoArgs("usage: devtools sessions"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if machine == "" {
-				return a.openHub(hub.ModeOpen, "")
-			}
-			backend, err := a.multiplexer()
-			if err != nil {
-				return err
-			}
-			if backend != mux.Herdr {
-				return errors.New("--machine needs the herdr multiplexer")
-			}
-			return pickWorkspace(stdout, machine)
+			return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeOpen}})
 		},
 	}
-	cmd.Flags().StringVar(&machine, "machine", "", "pick a workspace on a saved herdr machine")
-	return cmd
 }
 
-func (a *app) multiplexer() (mux.Backend, error) {
+// openBackend is backend.Open; tests replace it to hand the commands a
+// recording mux.Multiplexer.
+var openBackend = backend.Open
+
+// multiplexer finds the multiplexer of this command, once, at its start
+// (5.3.8 steps 1 to 3): where the command runs, mux.Detect over the facts
+// of this process; which backend, mux.Select with DEVTOOLS_MULTIPLEXER and
+// the multiplexer directive; and the implementation, backend.Open. It
+// returns the multiplexer with the context it was opened in. A selection
+// error is the words of its kind (ambiguous, mismatch, unavailable) or, for
+// a name mux.Parse rejects, its own text; each ends the command with status
+// 1 before it does anything else.
+func (a *app) multiplexer() (mux.Multiplexer, mux.Context, error) {
+	if a.picked != nil {
+		return a.picked.m, a.picked.c, nil
+	}
 	cfg, err := loadConfig()
 	if err != nil {
-		return "", err
+		return nil, mux.Context{}, err
 	}
-	return mux.Select(cfg.Multiplexer)
+	env := os.Environ()
+	c := mux.Detect(backend.Facts(env, terminalIn, terminalOut))
+	b, err := mux.Select(c, mux.Choice{Env: os.Getenv("DEVTOOLS_MULTIPLEXER"), Config: cfg.Multiplexer}, backend.Available)
+	if err != nil {
+		return nil, c, selectionWords(err)
+	}
+	// the roots the hub of a backend scans are the roots of this command:
+	// --root, then DEVTOOLS_ROOT, then the config
+	if roots := a.commandRoots(); len(roots) > 0 {
+		cfg.Roots = roots
+	}
+	m, err := openBackend(b, c, backend.Deps{
+		Config:  &cfg,
+		Actions: hubActions{},
+		Version: version,
+		In:      terminalIn,
+		Out:     terminalOut,
+		Env:     env,
+	})
+	if err != nil {
+		return nil, c, err
+	}
+	a.picked = &picked{m: m, c: c}
+	return m, c, nil
 }
 
-// sessions live in herdr by default and in tmux inside tmux, see mux.Select
-func (a *app) switchSession(dir, session string) error {
-	backend, err := a.multiplexer()
-	if err != nil {
-		return err
-	}
-	if backend == mux.Herdr {
-		var workspace string
-		err := herdr.Visit(func() error {
-			var err error
-			workspace, err = herdr.Client{}.SwitchWorkspace(dir, session)
-			return err
-		})
-		if err == nil {
-			showLocal(workspace)
+// commandRoots are the roots named by --root or DEVTOOLS_ROOT, nil when
+// neither names one (then the config's roots stand).
+func (a *app) commandRoots() []string {
+	roots := a.roots
+	if len(roots) == 0 {
+		if env := os.Getenv("DEVTOOLS_ROOT"); env != "" {
+			roots = filepath.SplitList(env)
 		}
-		return err
 	}
-	return tmux.Switch(dir, session)
+	var out []string
+	for _, r := range roots {
+		if r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
-// closeForRemoval leaves the session of a worktree about to be removed, the
-// returned function finishes closing it once the worktree is gone
-func (a *app) closeForRemoval(targetSession, fallbackSession, fallbackDir string) (func() error, error) {
-	backend, err := a.multiplexer()
-	if err != nil {
-		return nil, err
+// selectionWords is what a person reads for an error of mux.Select: the
+// words of 5.3.9 for the three typed errors (for an unavailable backend
+// backend.UnavailableWords, the noserver words for devtools, so this
+// package names no backend), and the error's own text for a name mux.Parse
+// rejects.
+func selectionWords(err error) error {
+	switch e := err.(type) {
+	case *mux.ErrMismatch:
+		return words(ui.Message("mismatch", string(e.Asked), string(e.Inside)))
+	case *mux.ErrUnavailable:
+		return words(backend.UnavailableWords(e))
+	case *mux.ErrAmbiguous:
+		names := ambiguousNames(e.Marks)
+		return words(ui.Message("ambiguous", names[0], names[1]))
 	}
-	if backend == mux.Herdr {
-		return herdr.Client{}.CloseForRemoval(targetSession, fallbackSession, fallbackDir)
+	return err
+}
+
+// ambiguousNames are the two names the ambiguous words give: the live
+// backends of the context, then screen or zellij when their mark is set
+// (they are live whenever set, and Context.Marks lists backends only).
+func ambiguousNames(marks []mux.Backend) []string {
+	var names []string
+	for _, b := range marks {
+		names = append(names, string(b))
 	}
-	return func() error { return nil }, tmux.CloseForRemoval(targetSession, fallbackSession, fallbackDir)
+	if os.Getenv("STY") != "" {
+		names = append(names, "screen")
+	}
+	if os.Getenv("ZELLIJ") != "" || os.Getenv("ZELLIJ_SESSION_NAME") != "" {
+		names = append(names, "zellij")
+	}
+	// Detect makes a context ambiguous only with two live marks, so this
+	// only keeps the words from failing on a context built by hand.
+	for len(names) < 2 {
+		names = append(names, "")
+	}
+	return names
+}
+
+// wordsError is an error whose text is the words a person reads. Run
+// prints it on standard error and the command ends with status 1.
+type wordsError struct{ text string }
+
+func (e *wordsError) Error() string { return e.text }
+
+func words(text string) error { return &wordsError{text: text} }
+
+// say prints a line for the person on standard error, where Run prints the
+// errors too.
+func (a *app) say(text string) {
+	if a.stderr != nil {
+		fmt.Fprintln(a.stderr, text)
+	}
 }
 
 func usageNoArgs(usage string) cobra.PositionalArgs {

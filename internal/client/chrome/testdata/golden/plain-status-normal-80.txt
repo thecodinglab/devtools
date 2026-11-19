@@ -1,0 +1,5 @@
+size 80x1 cursor 0,0 hidden
+ desktop  devtools/main   [1 zsh]  2 nvim  3 claude ? !           ? 1 needs you|
+styles
+0 10 13 bold
+0 26 7 bold

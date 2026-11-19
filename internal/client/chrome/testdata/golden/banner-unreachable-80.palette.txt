@@ -1,0 +1,6 @@
+size 80x1 cursor 0,0 hidden
+ macmini  not reachable. Retrying. Typing is paused.|
+styles
+0 0 1 reverse
+0 1 7 bold reverse
+0 8 72 reverse

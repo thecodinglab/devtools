@@ -1,0 +1,4 @@
+size 40x1 cursor 0,0 hidden
+ copy   line 7,412 of 8,113|
+styles
+0 0 6 bold reverse

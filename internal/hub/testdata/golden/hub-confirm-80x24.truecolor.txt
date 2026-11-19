@@ -1,0 +1,62 @@
+size 80x23 cursor 0,0 hidden
+  › Switch to a worktree, or name a new feature          all  sessions  agents|
+|
+  devtools|
+▎   main            3 changed    ↑2   ◆ needs you   Fix the hub footer|
+    replace-herdr                     ● working     Plan part 4|
+    fix-footer      1 changed           open|
+  systems|
+    main            12 changed   ↓1   ○ idle|
+  notes|
+    main|
+|
+  macmini   listing…|
+  devtools|
+    main                              ✓ done        Review PR 212|
+  blog|
+    main                              ● working     Draft the post|
+|
+  macbook   connecting…|
+|
+|
+|
+  Merge fix-footer into main, then remove its worktree and branch?|
+  ⏎ merge   esc cancel|
+styles
+0 4 43 p8
+0 57 3 bold p4
+0 62 8 p8
+0 72 6 p8
+2 2 8 bold #e6e7eb
+3 0 1 p4
+3 20 9 #a6a8b0
+3 33 2 #a6a8b0
+3 38 11 #ec8a3f
+3 52 18 p8
+4 38 9 #a6a8b0
+4 52 11 p8
+5 0 4 on #30323a
+5 4 10 bold #e6e7eb on #30323a
+5 14 6 on #30323a
+5 20 9 #a6a8b0 on #30323a
+5 29 11 on #30323a
+5 40 4 #a6a8b0 on #30323a
+5 44 36 on #30323a
+6 2 7 bold #e6e7eb
+7 20 10 #a6a8b0
+7 33 2 #a6a8b0
+7 38 6 p8
+8 2 5 bold #e6e7eb
+11 1 9 bold #e6e7eb on #30323a
+11 12 8 #a6a8b0
+12 2 8 bold #e6e7eb
+13 52 13 p8
+14 2 4 bold #e6e7eb
+15 38 9 #a6a8b0
+15 52 14 p8
+17 1 9 bold #e6e7eb on #30323a
+17 12 11 #a6a8b0
+22 2 1 #a6a8b0
+22 4 5 p8
+22 12 3 #a6a8b0
+22 16 6 p8

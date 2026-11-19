@@ -1,0 +1,5 @@
+size 80x1 cursor 0,0 hidden
+ @macmini  devtools/main   [1 zsh]  2 nvim  3 claude ? !          ? 1 needs you|
+styles
+0 11 13 bold
+0 27 7 bold

@@ -1,0 +1,10 @@
+size 80x1 cursor 0,0 hidden
+ prefix   esc cancel   o hub   s sessions   a agents   c new tab   ? more|
+styles
+0 0 8 bold reverse
+0 14 6 p8
+0 25 3 p8
+0 33 8 p8
+0 46 6 p8
+0 57 7 p8
+0 69 4 p8

@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  Nothing matches fix-stat.|
+styles
+0 2 25 p8

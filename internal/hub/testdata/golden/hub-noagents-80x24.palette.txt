@@ -1,0 +1,43 @@
+size 80x24 cursor 4,0 visible
+  › Switch to a worktree, or name a new feature                  all  sessions|
+|
+  devtools|
+▎▸  main            3 changed    ↑2     open|
+    replace-herdr                       open|
+    fix-footer      1 changed           open|
+  systems|
+    main            12 changed   ↓1     open|
+  notes|
+    main|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+  ⏎ switch   ⌃N new feature   tab sessions   esc close|
+styles
+0 4 43 p8
+0 65 3 bold p4
+0 70 8 p8
+2 2 8 bold
+3 0 1 p4
+3 1 1 bold
+3 4 4 bold
+3 40 4 p8
+4 40 4 p8
+5 40 4 p8
+6 2 7 bold
+7 40 4 p8
+8 2 5 bold
+23 4 6 p8
+23 16 11 p8
+23 34 8 p8
+23 49 5 p8

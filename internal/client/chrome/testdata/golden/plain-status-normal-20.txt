@@ -1,0 +1,4 @@
+size 20x1 cursor 0,0 hidden
+ desktop  devtools/m|
+styles
+0 10 10 bold

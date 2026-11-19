@@ -1,0 +1,16 @@
+size 135x1 cursor 0,0 hidden
+ desktop  devtools-main   1 zsh !  2 claude ◆  3 claude ✓  4 codex ●  5 nvim            macmini   ◆ 1 needs you  ✓ 1 done  ● 2   14:32|
+styles
+0 1 7 p8
+0 10 13 bold
+0 26 5 bold p4
+0 32 1 #ec8a3f
+0 35 8 p8
+0 44 1 #ec8a3f
+0 47 8 p8
+0 59 7 p8
+0 67 1 #a6a8b0
+0 70 6 p8
+0 88 7 p8
+0 98 13 #ec8a3f
+0 123 3 #a6a8b0

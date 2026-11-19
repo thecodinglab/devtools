@@ -1,0 +1,4 @@
+size 10x3 cursor 0,0 hidden
+Window too|
+20 by 6 ne|
+|

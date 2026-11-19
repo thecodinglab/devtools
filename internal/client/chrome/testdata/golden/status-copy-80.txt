@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ copy   line 7,412 of 8,113   selecting lines       v select   y copy   q leave|

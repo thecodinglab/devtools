@@ -1,0 +1,2 @@
+This terminal is a devtools pane on desktop.
+tmux was not started, because it would run inside that pane.

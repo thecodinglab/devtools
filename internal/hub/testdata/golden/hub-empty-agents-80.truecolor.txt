@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  No agents running. Start claude or codex in a pane.|
+styles
+0 2 51 p8

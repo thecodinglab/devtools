@@ -1,0 +1,27 @@
+# fixture e4-claude-title. provisional (E4): synthetic, from pane run B2: the
+# same fake in a pane WITHOUT the PROGRAM_STATUS callback, so the 7501 query
+# is not answered and the fake falls back to title glyphs as the 2.1.319
+# bundle does (function hee: "✳ " at rest, "◐ "/"◑ " every 960 ms while busy).
+# NOT a recording. The permission prompt (2201) and the question (4201) show
+# "✳ " like idle: the title carries no "blocked" (F10 applies only to a pane
+# that does not answer 7501).
+0      proc    .claude-wrapped [/nix/store/4ikygy36qrkaxixgjpnwh5y84diqwai2-claude-code-2.1.319/bin/claude --settings /nix/store/16gi670xv2hrqpbi65s38g0y356367w9-claude-code-proxy-settings.json]   unknown
+1      title   "✳ Claude Code"               idle
+1000   title   "◐ Claude Code"               working
+2001   title   "◑ Claude Code"               working
+2201   title   "✳ Claude Code"               working
+2701   tick    -                             done
+3000   title   "◐ Claude Code"               working
+4001   title   "◑ Claude Code"               working
+4201   title   "✳ Claude Code"               working
+4701   tick    -                             done
+5000   title   "◐ Claude Code"               working
+6002   title   "◑ Claude Code"               working
+7000   title   "✳ Claude Code"               working
+7500   tick    -                             done
+8000   title   "◐ Claude Code"               working
+9002   title   "◑ Claude Code"               working
+9203   title   "✳ Claude Code"               working
+9703   tick    -                             done
+10500  proc    (no match)                    done
+11500  proc    (no match)                    gone

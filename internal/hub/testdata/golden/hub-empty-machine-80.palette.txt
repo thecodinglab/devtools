@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  Nothing on macmini yet. Run devtools clone <url> there.|
+styles
+0 2 55 p8

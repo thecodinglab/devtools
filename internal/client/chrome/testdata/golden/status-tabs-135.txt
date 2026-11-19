@@ -1,0 +1,2 @@
+size 135x1 cursor 0,0 hidden
+ desktop  devtools-main   1 zsh !  2 claude ◆  3 claude ✓  4 codex ●  5 nvim            macmini   ◆ 1 needs you  ✓ 1 done  ● 2   14:32|

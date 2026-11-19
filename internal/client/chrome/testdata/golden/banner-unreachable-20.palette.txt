@@ -1,0 +1,6 @@
+size 20x1 cursor 0,0 hidden
+ macmini  not reac…|
+styles
+0 0 1 reverse
+0 1 7 bold reverse
+0 8 12 reverse

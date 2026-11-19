@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ desktop  the devtools server stopped. Reconnecting. Typing is paused.|

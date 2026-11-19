@@ -1,0 +1,7 @@
+size 80x1 cursor 0,0 hidden
+  ⏎ switch   ⌃N new feature   tab sessions   esc clear|
+styles
+0 4 6 p8
+0 16 11 p8
+0 34 8 p8
+0 49 5 p8

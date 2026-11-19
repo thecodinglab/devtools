@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  ✗ git merge failed: conflict in internal/hub/view.go|
+styles
+0 2 1 p1

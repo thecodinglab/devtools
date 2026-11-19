@@ -1,0 +1,46 @@
+size 80x15 cursor 0,0 hidden
+  macmini|
+  macmini   listing…|
+  macmini   connecting…|
+  macbook   not connected.|
+  macmini   not reachable. Retrying.|
+  macbook   not reachable. Opening the hub again retries.|
+  macmini   ✗ ssh could not log in. Run ssh macmini once in a shell.|
+  macmini   ✗ host key not accepted. Run ssh macmini once and check it.|
+  macmini   ✗ devtools is not installed there.|
+  macmini   ✗ the devtools server is not running there.|
+  macmini   ✗ incompatible. Update devtools on macmini.|
+  macmini   ✗ unexpected answer: bash: devtools: Permission denied|
+  macmini   list cut at 2,000 rows. Type to narrow it.|
+  macmini   scan did not finish. Some worktrees may be missing.|
+  desktop   server is older than this client. Run devtools server restart.|
+styles
+0 1 9 bold #e6e7eb on #30323a
+1 1 9 bold #e6e7eb on #30323a
+1 12 8 #a6a8b0
+2 1 9 bold #e6e7eb on #30323a
+2 12 11 #a6a8b0
+3 1 9 bold #e6e7eb on #30323a
+3 12 14 #a6a8b0
+4 1 9 bold #e6e7eb on #30323a
+4 12 24 #a6a8b0
+5 1 9 bold #e6e7eb on #30323a
+5 12 45 #a6a8b0
+6 1 9 bold #e6e7eb on #30323a
+6 12 1 p1
+7 1 9 bold #e6e7eb on #30323a
+7 12 1 p1
+8 1 9 bold #e6e7eb on #30323a
+8 12 1 p1
+9 1 9 bold #e6e7eb on #30323a
+9 12 1 p1
+10 1 9 bold #e6e7eb on #30323a
+10 12 1 p1
+11 1 9 bold #e6e7eb on #30323a
+11 12 1 p1
+12 1 9 bold #e6e7eb on #30323a
+12 12 42 #a6a8b0
+13 1 9 bold #e6e7eb on #30323a
+13 12 51 #a6a8b0
+14 2 7 p8
+14 12 62 #a6a8b0

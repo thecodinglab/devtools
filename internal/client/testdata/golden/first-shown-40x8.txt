@@ -1,0 +1,13 @@
+size 40x8 cursor 2,1 visible
+~/dev/devtools/main|
+$ ls|
+go.mod  internal|
+|
+|
+|
+|
+ desktop  devtools-main   [1 zsh]|
+styles
+1 2 2 bold
+7 10 13 bold
+7 26 7 bold

@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  No open sessions. Press shift+tab to list every worktree.|
+styles
+0 2 57 p8

@@ -1,0 +1,2 @@
+size 20x1 cursor 0,0 hidden
+ macm…    2 ●   ◆ 1|

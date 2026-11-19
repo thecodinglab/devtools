@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+  A feature can only be created on this machine.|

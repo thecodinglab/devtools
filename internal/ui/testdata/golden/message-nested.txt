@@ -1,0 +1,2 @@
+This terminal is a devtools pane on desktop.
+Open the hub with ctrl+space o to switch there.

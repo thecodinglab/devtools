@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ prefix                                macmini …  macbook …   Tue 17 Nov  14:32|

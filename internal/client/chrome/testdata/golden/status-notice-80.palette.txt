@@ -1,0 +1,6 @@
+size 80x1 cursor 0,0 hidden
+ desktop  devtools-main   macmini did not answer          ◆ 1  ✓ 1  ● 2   14:32|
+styles
+0 1 7 p8
+0 10 13 bold
+0 58 3 p3

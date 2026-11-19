@@ -1,0 +1,7 @@
+size 80x1 cursor 0,0 hidden
+ desktop                               macmini …  macbook …   Tue 17 Nov  14:32|
+styles
+0 1 7 p8
+0 39 9 #a6a8b0
+0 50 9 #a6a8b0
+0 62 10 p8

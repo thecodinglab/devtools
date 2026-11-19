@@ -1,0 +1,51 @@
+size 80x24 cursor 4,0 visible
+  › Jump to an agent                                     all  sessions  agents|
+|
+▎ ◆ needs you   devtools-main            2 claude   Fix the hub footer|
+  ● working     devtools-replace-herdr   2 claude   Plan part 4|
+  ○ idle        systems-main             3 claude|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+  ⏎ jump to pane   tab all   esc close|
+styles
+0 4 16 p8
+0 57 3 p8
+0 62 8 p8
+0 72 6 bold p4
+2 0 1 p4 on #30323a
+2 1 1 on #30323a
+2 2 11 bold #ec8a3f on #30323a
+2 13 3 on #30323a
+2 16 13 bold #e6e7eb on #30323a
+2 29 12 on #30323a
+2 41 8 #a6a8b0 on #30323a
+2 49 3 on #30323a
+2 52 18 #a6a8b0 on #30323a
+2 70 10 on #30323a
+3 2 9 #a6a8b0
+3 41 8 #a6a8b0
+3 52 11 p8
+4 2 6 p8
+4 41 8 #a6a8b0
+23 2 1 #a6a8b0
+23 4 12 p8
+23 19 3 #a6a8b0
+23 23 3 p8
+23 29 3 #a6a8b0
+23 33 5 p8

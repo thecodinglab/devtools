@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ Close this pane? nvim is still running.   ⏎ close pane   esc cancel|

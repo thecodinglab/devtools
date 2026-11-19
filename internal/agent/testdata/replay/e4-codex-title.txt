@@ -1,0 +1,25 @@
+# fixture e4-codex-title. provisional (E4): synthetic, from pane run B3; the
+# titles are the strings found in the Codex 0.167.0 binary ("[ ! ] Action
+# Required", braille frames U+280B...). The process shape is inferred from the
+# Nix wrapper (exec -a "$0" .codex-wrapped), not observed. NOT a recording;
+# without a real Codex recording F32 drops this fixture. The fake also sent
+# OSC 7501 reports (B3), because the binary holds "ESC ]7501;state=" with
+# ":app=codex" and ":kind="; the expected column follows the title rule of
+# 3.6.2 only.
+0      proc    .codex-wrapped [/nix/store/m40y4d072lw6556sl06w2q6k43fbp8kx-codex-0.167.0/bin/codex]   unknown
+1      title   "codex"                       idle
+800    title   "⠋ codex"                     working
+900    title   "⠙ codex"                     working
+1000   title   "⠹ codex"                     working
+1100   title   "⠸ codex"                     working
+1201   title   "⠼ codex"                     working
+1301   title   "[ ! ] Action Required"       blocked
+2000   title   "⠋ codex"                     working
+2100   title   "⠙ codex"                     working
+2200   title   "⠹ codex"                     working
+2300   title   "⠸ codex"                     working
+2400   title   "⠼ codex"                     working
+2500   title   "codex"                       working
+3000   tick    -                             done
+3600   proc    (no match)                    done
+4600   proc    (no match)                    gone

@@ -1,0 +1,2 @@
+size 40x1 cursor 0,0 hidden
+ switching   macmini notes-main…    ◆ 1|

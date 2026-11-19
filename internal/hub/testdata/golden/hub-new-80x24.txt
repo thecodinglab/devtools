@@ -1,0 +1,24 @@
+size 80x23 cursor 14,0 visible
+  › fix-status                                           all  sessions  agents|
+|
+  + New feature fix-status in devtools, from main|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+  ⏎ create   tab sessions   esc clear|

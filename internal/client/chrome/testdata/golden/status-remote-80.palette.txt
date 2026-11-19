@@ -1,0 +1,9 @@
+size 80x1 cursor 0,0 hidden
+[macmini] notes-main   1 zsh  2 claude ●        macmini   ◆ 1  ✓ 1  ● 2   14:32|
+styles
+0 0 9 bold
+0 10 10 bold
+0 23 5 p8
+0 30 8 bold p4
+0 48 7 p8
+0 58 3 p3

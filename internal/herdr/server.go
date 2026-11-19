@@ -104,19 +104,3 @@ func Attach(args ...string) error {
 	}
 	return nil
 }
-
-// Visit runs focus against the local server and, outside herdr, first makes
-// sure a server runs and afterwards attaches the terminal to it, like tmux
-// new-session -A.
-func Visit(focus func() error) error {
-	if Inside() {
-		return focus()
-	}
-	if err := EnsureServer(); err != nil {
-		return err
-	}
-	if err := focus(); err != nil {
-		return err
-	}
-	return Attach()
-}

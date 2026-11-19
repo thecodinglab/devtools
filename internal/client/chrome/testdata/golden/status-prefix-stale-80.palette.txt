@@ -1,0 +1,7 @@
+size 80x1 cursor 0,0 hidden
+ prefix                1 zsh  2 claude      macmini retrying   ◆ 1  ● 1   14:32|
+styles
+0 0 20 bold reverse
+0 23 5 bold p4
+0 30 8 p8
+0 63 3 p3

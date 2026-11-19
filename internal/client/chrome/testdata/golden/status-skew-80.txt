@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ desktop  devtools-main   Server is older. Run devtools server restart.     ◆ 1|

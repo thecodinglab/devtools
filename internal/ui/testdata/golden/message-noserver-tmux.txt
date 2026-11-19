@@ -1,0 +1,3 @@
+The devtools server is not running.
+Start it with: systemctl --user start devtools-server
+To use tmux for now, put DEVTOOLS_MULTIPLEXER=tmux before the command.

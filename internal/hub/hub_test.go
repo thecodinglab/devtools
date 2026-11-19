@@ -2,33 +2,46 @@ package hub
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
+	"devtools/internal/client/chrome"
+	"devtools/internal/session"
 	"devtools/internal/ui"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-type fakeBackend struct {
-	sessions map[string]ui.Session
-	others   []Item
-	created  []CreateRequest
-	merged   []Item
-	switched []Item
-	mergeErr error
-	note     string
+// TestMain makes the tests hermetic (10.1): nothing of the developer's
+// terminal, multiplexer or home reaches them.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "devtools-hub-test")
+	if err != nil {
+		panic(err)
+	}
+	for _, name := range []string{
+		"DEVTOOLS_SOCKET", "DEVTOOLS_PANE", "DEVTOOLS_TTY", "DEVTOOLS_CONFIG",
+		"DEVTOOLS_MULTIPLEXER", "XDG_STATE_HOME", "XDG_CONFIG_HOME",
+		"TMUX", "TMUX_PANE", "HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_ACTIVE_PANE_CWD",
+	} {
+		os.Unsetenv(name)
+	}
+	os.Setenv("HOME", home)
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
 }
 
-func (f *fakeBackend) Status(path string) (ui.Git, error) { return ui.Git{}, nil }
-func (f *fakeBackend) Sessions() (map[string]ui.Session, []Item, error) {
-	return f.sessions, f.others, nil
+// fakeBackend is the hub.Actions of the tests: it records what was asked
+// for and answers at once.
+type fakeBackend struct {
+	created  []CreateRequest
+	merged   []Item
+	mergeErr error
 }
-func (f *fakeBackend) Switch(item Item) (string, error) {
-	f.switched = append(f.switched, item)
-	return f.note, nil
-}
+
 func (f *fakeBackend) Create(req CreateRequest) (Item, error) {
 	f.created = append(f.created, req)
 	return Item{Kind: KindWorktree, Project: req.Project, Worktree: req.Branch, Label: req.Project + "/" + req.Branch}, nil
@@ -63,70 +76,91 @@ func testItems() []Item {
 	}
 }
 
-func newTestModel(t *testing.T, opts Options) (model, *fakeBackend) {
+// newTestModel builds the hub with every feature, 100x20, and feeds it
+// testItems as one complete scan of this machine.
+func newTestModel(t *testing.T, o ModelOptions) (*Model, *fakeBackend) {
 	t.Helper()
-	backend, _ := opts.Backend.(*fakeBackend)
+	return newModelOf(t, o, testItems())
+}
+
+// newModelOf is newTestModel with other items. With nil items it feeds
+// nothing: the hub as it shows before the catalog of this machine answers.
+func newModelOf(t *testing.T, o ModelOptions, items []Item) (*Model, *fakeBackend) {
+	t.Helper()
+	backend, _ := o.Actions.(*fakeBackend)
 	if backend == nil {
 		backend = &fakeBackend{}
-		opts.Backend = backend
+		o.Actions = backend
 	}
-	if opts.Items == nil {
-		opts.Items = testItems()
+	o.Features = Features{Agents: true, Machines: true}
+	m := New(o)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if items != nil {
+		feed(m, Event{Kind: Items, Items: items}, Event{Kind: Complete})
 	}
-	m := newModel(opts)
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
-	return next.(model), backend
+	return m, backend
 }
 
-func typeText(t *testing.T, m model, text string) model {
+// at is the target of a pane in dir on this machine.
+func at(dir string) session.Target { return session.Target{Dir: dir} }
+
+func typeText(t *testing.T, m *Model, text string) {
 	t.Helper()
 	for _, r := range text {
-		next, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		m = next.(model)
+		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
-	return m
 }
 
-func press(t *testing.T, m model, key tea.KeyPressMsg) (model, tea.Cmd) {
+func press(t *testing.T, m *Model, key tea.KeyPressMsg) (tea.Cmd, *chrome.Outcome) {
 	t.Helper()
-	next, cmd := m.Update(key)
-	return next.(model), cmd
+	return m.Update(key)
 }
 
 // run follows the commands a key started, feeding their messages back in,
-// the way the program loop would, until a quit or nothing more to do.
-func run(t *testing.T, m model, cmd tea.Cmd) (model, bool) {
+// the way the host's loop would, until the hub closes (the Outcome it
+// returns) or there is nothing more to do (nil).
+func run(t *testing.T, m *Model, cmd tea.Cmd) *chrome.Outcome {
 	t.Helper()
 	for cmd != nil {
 		msg := cmd()
-		if _, ok := msg.(tea.QuitMsg); ok {
-			return m, true
-		}
 		if batch, ok := msg.(tea.BatchMsg); ok {
 			for _, c := range batch {
-				var quit bool
-				if m, quit = run(t, m, c); quit {
-					return m, true
+				if out := run(t, m, c); out != nil {
+					return out
 				}
 			}
-			return m, false
+			return nil
 		}
-		next, nextCmd := m.Update(msg)
-		m, cmd = next.(model), nextCmd
+		var out *chrome.Outcome
+		cmd, out = m.Update(msg)
+		if out != nil {
+			return out
+		}
 	}
-	return m, false
+	return nil
+}
+
+// pickedLabel is the label of the row a closed hub picked, "" when it
+// closed without a choice or is still open.
+func pickedLabel(m *Model, out *chrome.Outcome) string {
+	if out == nil || out.Switch == nil || m.Picked() == nil {
+		return ""
+	}
+	return m.Picked().Item.Label
 }
 
 var (
-	enter = tea.KeyPressMsg{Code: tea.KeyEnter}
-	esc   = tea.KeyPressMsg{Code: tea.KeyEscape}
-	tab   = tea.KeyPressMsg{Code: tea.KeyTab}
-	down  = tea.KeyPressMsg{Code: tea.KeyDown}
-	ctrlN = tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}
-	ctrlG = tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
+	enter    = tea.KeyPressMsg{Code: tea.KeyEnter}
+	esc      = tea.KeyPressMsg{Code: tea.KeyEscape}
+	tab      = tea.KeyPressMsg{Code: tea.KeyTab}
+	shiftTab = tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	up       = tea.KeyPressMsg{Code: tea.KeyUp}
+	down     = tea.KeyPressMsg{Code: tea.KeyDown}
+	ctrlN    = tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}
+	ctrlG    = tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
 )
 
-func selectedLabel(m model) string {
+func selectedLabel(m *Model) string {
 	if m.onCreate() {
 		return "<create>"
 	}
@@ -138,14 +172,14 @@ func selectedLabel(m model) string {
 }
 
 func TestCursorStartsWhereYouAre(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/xcloud/main/src"})
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/xcloud/main/src")})
 	if got := selectedLabel(m); got != "xcloud/main" {
 		t.Fatalf("selected = %q, want xcloud/main", got)
 	}
 }
 
 func TestRowsGroupWorktreesUnderTheirProject(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
+	m, _ := newTestModel(t, ModelOptions{})
 	var got []string
 	for _, r := range m.rows {
 		if r.kind == rowHeader {
@@ -161,8 +195,8 @@ func TestRowsGroupWorktreesUnderTheirProject(t *testing.T) {
 }
 
 func TestQuerySelectsBestMatch(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
-	m = typeText(t, m, "xref")
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+	typeText(t, m, "xref")
 	if got := selectedLabel(m); got != "xcloud/feature-refactoring" {
 		t.Fatalf("selected = %q, want xcloud/feature-refactoring", got)
 	}
@@ -172,28 +206,28 @@ func TestQuerySelectsBestMatch(t *testing.T) {
 }
 
 func TestUnmatchedQueryBecomesFeatureInProjectYouAreIn(t *testing.T) {
-	m, backend := newTestModel(t, Options{Here: "/dev/devtools/popup-redesign"})
-	m = typeText(t, m, "  my cool feature ")
+	m, backend := newTestModel(t, ModelOptions{Here: at("/dev/devtools/popup-redesign")})
+	typeText(t, m, "  my cool feature ")
 	if !m.onCreate() {
 		t.Fatalf("selected = %q, want the create row", selectedLabel(m))
 	}
-	m, cmd := press(t, m, enter)
-	m, quit := run(t, m, cmd)
-	if !quit {
+	cmd, _ := press(t, m, enter)
+	out := run(t, m, cmd)
+	if out == nil {
 		t.Fatalf("expected the switcher to quit after creating, message=%q", m.message)
 	}
 	want := CreateRequest{Root: "/dev", Project: "devtools", Branch: "my-cool-feature", From: "popup-redesign", FromPath: "/dev/devtools/popup-redesign"}
 	if len(backend.created) != 1 || backend.created[0] != want {
 		t.Fatalf("created = %+v, want %+v", backend.created, want)
 	}
-	if m.result == nil || m.result.Label != "devtools/my-cool-feature" {
-		t.Fatalf("result = %+v, want the new worktree", m.result)
+	if got := pickedLabel(m, out); got != "devtools/my-cool-feature" {
+		t.Fatalf("picked = %q (%+v), want the new worktree", got, out)
 	}
 }
 
 func TestProjectPrefixCreatesInThatProjectFromMain(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
-	m = typeText(t, m, "xcloud/fix/login")
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+	typeText(t, m, "xcloud/fix/login")
 	want := CreateRequest{Root: "/dev", Project: "xcloud", Branch: "fix/login", From: "main", FromPath: "/dev/xcloud/main"}
 	if m.create == nil || *m.create != want {
 		t.Fatalf("create = %+v, want %+v", m.create, want)
@@ -201,8 +235,8 @@ func TestProjectPrefixCreatesInThatProjectFromMain(t *testing.T) {
 }
 
 func TestExistingWorktreeNameOffersNoCreateRow(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
-	m = typeText(t, m, "popup-redesign")
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+	typeText(t, m, "popup-redesign")
 	if m.create != nil {
 		t.Fatalf("create = %+v, want none for an existing worktree", m.create)
 	}
@@ -212,159 +246,173 @@ func TestExistingWorktreeNameOffersNoCreateRow(t *testing.T) {
 }
 
 func TestOutsideAProjectExplainsHowToStartAFeature(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/elsewhere"})
-	m = typeText(t, m, "zzz")
+	m, _ := newTestModel(t, ModelOptions{Here: at("/elsewhere")})
+	typeText(t, m, "zzz")
 	if m.create != nil {
 		t.Fatalf("create = %+v, want none outside a project", m.create)
 	}
 	if !strings.Contains(m.noCreate, "project/name") {
 		t.Fatalf("noCreate = %q, want a hint at project/name", m.noCreate)
 	}
-	m, _ = press(t, m, ctrlN)
+	press(t, m, ctrlN)
 	if m.message != m.noCreate {
 		t.Fatalf("message = %q, want the hint", m.message)
 	}
 }
 
-func TestTabShowsOnlyOpenWorkspacesAndOthers(t *testing.T) {
-	backend := &fakeBackend{
-		sessions: map[string]ui.Session{
-			"xcloud-main": {Open: true, Agent: "working"},
-			"scratch":     {Open: true},
-		},
-		others: []Item{
-			{Kind: KindWorkspace, Project: "xcloud-main", Label: "xcloud-main", Session: "xcloud-main", WorkspaceID: "w1", State: ui.Session{Open: true, Agent: "working"}},
-			{Kind: KindWorkspace, Project: "scratch", Label: "scratch", Session: "scratch", WorkspaceID: "w2", State: ui.Session{Open: true}},
-		},
+// TestTabCyclesTheThreeScopes replaces TestTabShowsOnlyOpenWorkspacesAndOthers:
+// tab no longer toggles "open only", it goes to the next scope, and
+// shift+tab to the previous one instead of one row up (F25). The sessions
+// scope lists what the old open-only list did.
+func TestTabCyclesTheThreeScopes(t *testing.T) {
+	m, _ := newTestModel(t, ModelOptions{})
+	// the open sessions: one in the directory of xcloud/main, one that
+	// belongs to no worktree
+	feed(m, Event{Kind: Sessions, Items: []Item{
+		{Kind: KindSession, Label: "xcloud-main", Session: "xcloud-main", Path: "/dev/xcloud/main", State: ui.Session{Open: true, Agent: "working"}},
+		{Kind: KindSession, Project: "scratch", Label: "scratch", Session: "scratch", SessionID: "w2", State: ui.Session{Open: true}},
+	}})
+	var scopes []string
+	for i := range 4 {
+		scopes = append(scopes, m.currentScope())
+		if m.currentScope() == ui.ScopeSessions {
+			var got []string
+			for _, i := range m.selectable() {
+				got = append(got, m.items[m.rows[i].item].Label)
+			}
+			if strings.Join(got, ",") != "xcloud/main,scratch" {
+				t.Fatalf("open rows = %v, want xcloud/main and the unknown session scratch once", got)
+			}
+		}
+		if i < 3 {
+			press(t, m, tab)
+		}
 	}
-	m, _ := newTestModel(t, Options{Backend: backend})
-	m, _ = run(t, m, m.loadSessions())
-	m, _ = press(t, m, tab)
-	var got []string
-	for _, i := range m.selectable() {
-		got = append(got, m.items[m.rows[i].item].Label)
+	if got := strings.Join(scopes, ","); got != "all,sessions,agents,all" {
+		t.Fatalf("tab went through %s, want all,sessions,agents,all", got)
 	}
-	if strings.Join(got, ",") != "xcloud/main,scratch" {
-		t.Fatalf("open rows = %v, want xcloud/main and the unknown workspace scratch once", got)
+	scopes = scopes[:0]
+	for i := range 4 {
+		scopes = append(scopes, m.currentScope())
+		if i < 3 {
+			press(t, m, shiftTab)
+		}
+	}
+	if got := strings.Join(scopes, ","); got != "all,agents,sessions,all" {
+		t.Fatalf("shift+tab went through %s, want all,agents,sessions,all", got)
 	}
 }
 
 func TestNewModeOffersCreateFirstAndShowsTheProject(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/xcloud/main", Mode: ModeNew})
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/xcloud/main"), Mode: ModeNew})
 	for _, r := range m.rows {
 		if r.kind == rowItem && m.items[r.item].Project != "xcloud" {
 			t.Fatalf("new mode shows %s from another project", m.items[r.item].Label)
 		}
 	}
-	m = typeText(t, m, "main")
+	typeText(t, m, "main")
 	// an existing name has no create row, so enter would switch instead
 	if m.create != nil {
 		t.Fatalf("create = %+v for an existing worktree", m.create)
 	}
-	m, _ = press(t, m, esc)
-	m = typeText(t, m, "api")
+	press(t, m, esc)
+	typeText(t, m, "api")
 	if !m.onCreate() {
 		t.Fatalf("selected = %q, want the create row", selectedLabel(m))
 	}
 }
 
 func TestEnterReturnsItemWhenCallerSwitches(t *testing.T) {
-	m, backend := newTestModel(t, Options{Here: "/dev/devtools/main"})
-	m, _ = press(t, m, down)
-	m, cmd := press(t, m, enter)
-	if _, quit := run(t, m, cmd); !quit {
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+	press(t, m, down)
+	cmd, out := press(t, m, enter)
+	if out == nil {
+		out = run(t, m, cmd)
+	}
+	if out == nil {
 		t.Fatal("expected quit")
 	}
-	if m.result == nil || m.result.Label != "devtools/popup-redesign" {
-		t.Fatalf("result = %+v", m.result)
+	if got := pickedLabel(m, out); got != "devtools/popup-redesign" {
+		t.Fatalf("picked = %q (%+v)", got, out)
 	}
-	if len(backend.switched) != 0 {
-		t.Fatalf("switched in place: %+v", backend.switched)
-	}
-}
-
-func TestEnterSwitchesInPlace(t *testing.T) {
-	m, backend := newTestModel(t, Options{Here: "/dev/devtools/main", SwitchInPlace: true})
-	m, cmd := press(t, m, enter)
-	if _, quit := run(t, m, cmd); !quit {
-		t.Fatal("expected quit")
-	}
-	if len(backend.switched) != 1 || backend.switched[0].Label != "devtools/main" {
-		t.Fatalf("switched = %+v", backend.switched)
+	if want := (session.Target{Dir: "/dev/devtools/popup-redesign", Name: "devtools-popup-redesign"}); *out.Switch != want {
+		t.Fatalf("switch = %+v, want %+v", *out.Switch, want)
 	}
 }
 
 func TestMergeAsksFirstThenLandsOnMain(t *testing.T) {
-	m, backend := newTestModel(t, Options{Here: "/dev/devtools/popup-redesign"})
-	m, _ = press(t, m, ctrlG)
+	m, backend := newTestModel(t, ModelOptions{Here: at("/dev/devtools/popup-redesign")})
+	press(t, m, ctrlG)
 	if m.confirm == nil || m.confirm.Label != "devtools/popup-redesign" {
 		t.Fatalf("confirm = %+v", m.confirm)
 	}
-	if !strings.Contains(ansi.Strip(m.footer()), "Merge popup-redesign into main") {
-		t.Fatalf("footer = %q", ansi.Strip(m.footer()))
+	if !strings.Contains(ansi.Strip(m.footer(m.width)), "Merge popup-redesign into main") {
+		t.Fatalf("footer = %q", ansi.Strip(m.footer(m.width)))
 	}
-	m, cmd := press(t, m, enter)
-	m, quit := run(t, m, cmd)
-	if !quit || len(backend.merged) != 1 {
-		t.Fatalf("quit=%v merged=%+v", quit, backend.merged)
+	cmd, _ := press(t, m, enter)
+	out := run(t, m, cmd)
+	if out == nil || len(backend.merged) != 1 {
+		t.Fatalf("quit=%v merged=%+v", out != nil, backend.merged)
 	}
-	if m.result == nil || m.result.Label != "devtools/main" {
-		t.Fatalf("result = %+v, want main", m.result)
+	if got := pickedLabel(m, out); got != "devtools/main" {
+		t.Fatalf("picked = %q (%+v), want main", got, out)
 	}
 }
 
 func TestMergeFailureStaysOpenWithTheError(t *testing.T) {
 	backend := &fakeBackend{mergeErr: errors.New("popup-redesign does not rebase cleanly onto main")}
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/popup-redesign", Backend: backend})
-	m, _ = press(t, m, ctrlG)
-	m, cmd := press(t, m, enter)
-	m, quit := run(t, m, cmd)
-	if quit {
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/popup-redesign"), Actions: backend})
+	press(t, m, ctrlG)
+	cmd, _ := press(t, m, enter)
+	if out := run(t, m, cmd); out != nil {
 		t.Fatal("quit after a failed merge")
 	}
-	if !m.failed || !strings.Contains(ansi.Strip(m.footer()), "does not rebase cleanly") {
-		t.Fatalf("footer = %q", ansi.Strip(m.footer()))
+	if !m.failed || !strings.Contains(ansi.Strip(m.footer(m.width)), "does not rebase cleanly") {
+		t.Fatalf("footer = %q", ansi.Strip(m.footer(m.width)))
 	}
 }
 
 func TestMergeRefusesMainAndEscCancels(t *testing.T) {
-	m, backend := newTestModel(t, Options{Here: "/dev/devtools/main"})
-	m, _ = press(t, m, ctrlG)
+	m, backend := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+	press(t, m, ctrlG)
 	if m.confirm != nil || m.message == "" {
 		t.Fatalf("confirm=%+v message=%q, want a refusal for main", m.confirm, m.message)
 	}
-	m, _ = press(t, m, down)
-	m, _ = press(t, m, ctrlG)
-	m, _ = press(t, m, esc)
+	press(t, m, down)
+	press(t, m, ctrlG)
+	press(t, m, esc)
 	if m.confirm != nil || len(backend.merged) != 0 {
 		t.Fatalf("esc did not cancel: confirm=%+v merged=%+v", m.confirm, backend.merged)
 	}
 }
 
 func TestEscClearsQueryThenCloses(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
-	m = typeText(t, m, "dev")
-	m, cmd := press(t, m, esc)
-	if m.input.Value() != "" || cmd != nil {
-		t.Fatalf("first esc: value=%q cmd=%v", m.input.Value(), cmd)
+	m, _ := newTestModel(t, ModelOptions{})
+	typeText(t, m, "dev")
+	cmd, out := press(t, m, esc)
+	if m.input.Value() != "" || cmd != nil || out != nil {
+		t.Fatalf("first esc: value=%q cmd=%v outcome=%+v", m.input.Value(), cmd, out)
 	}
-	_, cmd = press(t, m, esc)
-	if _, quit := run(t, m, cmd); !quit {
-		t.Fatal("second esc should close")
+	cmd, out = press(t, m, esc)
+	if out == nil {
+		out = run(t, m, cmd)
+	}
+	if out == nil || out.Switch != nil {
+		t.Fatalf("second esc should close without a choice, outcome=%+v", out)
 	}
 }
 
 func TestRowsShowHeadingWhenMainDoesNotMatch(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
-	m = typeText(t, m, "refac")
+	m, _ := newTestModel(t, ModelOptions{})
+	typeText(t, m, "refac")
 	if len(m.rows) != 2 || m.rows[0].kind != rowHeader || m.rows[0].project != "xcloud" || !m.rows[1].child {
 		t.Fatalf("rows = %+v, want the xcloud heading over its matching feature", m.rows)
 	}
 }
 
 func TestSelectedRowFillsTheWidth(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/popup-redesign"})
-	for _, line := range strings.Split(m.View().Content, "\n") {
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/popup-redesign")})
+	for _, line := range strings.Split(m.View(m.width, m.height), "\n") {
 		if strings.Contains(line, "popup-redesign") {
 			if w := ansi.StringWidth(line); w != m.width {
 				t.Fatalf("selected row is %d wide, want %d", w, m.width)
@@ -377,11 +425,10 @@ func TestSelectedRowFillsTheWidth(t *testing.T) {
 
 func TestViewFitsSmallWindows(t *testing.T) {
 	for _, size := range [][2]int{{20, 5}, {40, 8}, {120, 40}} {
-		m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
-		next, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		m = next.(model)
-		m = typeText(t, m, "feature")
-		lines := strings.Split(m.View().Content, "\n")
+		m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		typeText(t, m, "feature")
+		lines := strings.Split(m.View(m.width, m.height), "\n")
 		if len(lines) > size[1] {
 			t.Fatalf("%dx%d: %d lines", size[0], size[1], len(lines))
 		}
@@ -416,32 +463,27 @@ func TestMatch(t *testing.T) {
 }
 
 func TestKeysWaitWhileAMergeRuns(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
+	m, _ := newTestModel(t, ModelOptions{})
 	m.busy = "Merging popup-redesign into main…"
 	for _, key := range []tea.KeyPressMsg{{Code: 'c', Mod: tea.ModCtrl}, esc, enter} {
-		next, cmd := m.Update(key)
-		m = next.(model)
-		if cmd != nil {
-			t.Fatalf("%s while busy started %v, want it ignored", key, cmd)
+		cmd, out := m.Update(key)
+		if cmd != nil || out != nil {
+			t.Fatalf("%s while busy started %v (outcome %+v), want it ignored", key, cmd, out)
 		}
 	}
 }
 
 func TestWorkspacesSharingALabelStayApart(t *testing.T) {
-	backend := &fakeBackend{
-		sessions: map[string]ui.Session{"scratch": {Open: true, Agent: "idle"}},
-		others: []Item{
-			{Kind: KindWorkspace, Project: "scratch", Label: "scratch", Session: "scratch", WorkspaceID: "w1", State: ui.Session{Open: true, Agent: "idle"}},
-			{Kind: KindWorkspace, Project: "scratch", Label: "scratch", Session: "scratch", WorkspaceID: "w2", State: ui.Session{Open: true, Agent: "blocked"}},
-		},
-	}
-	m, _ := newTestModel(t, Options{Backend: backend})
-	m, _ = run(t, m, m.loadSessions())
-	m = typeText(t, m, "scratch")
+	m, _ := newTestModel(t, ModelOptions{})
+	feed(m, Event{Kind: Sessions, Items: []Item{
+		{Kind: KindSession, Project: "scratch", Label: "scratch", Session: "scratch", SessionID: "w1", State: ui.Session{Open: true, Agent: "idle"}},
+		{Kind: KindSession, Project: "scratch", Label: "scratch", Session: "scratch", SessionID: "w2", State: ui.Session{Open: true, Agent: "blocked"}},
+	}})
+	typeText(t, m, "scratch")
 	var got []string
 	for _, r := range m.selectable() {
 		item := m.items[m.rows[r].item]
-		got = append(got, item.WorkspaceID+":"+m.session(item).Agent)
+		got = append(got, item.SessionID+":"+m.session(item).Agent)
 	}
 	if strings.Join(got, ",") != "w1:idle,w2:blocked" {
 		t.Fatalf("rows = %v, want both workspaces with their own state", got)
@@ -449,8 +491,8 @@ func TestWorkspacesSharingALabelStayApart(t *testing.T) {
 }
 
 func TestBestMatchWinsOverItsProjectsMain(t *testing.T) {
-	m, _ := newTestModel(t, Options{Items: []Item{worktree("application", "main"), worktree("application", "api")}})
-	m = typeText(t, m, "api")
+	m, _ := newModelOf(t, ModelOptions{}, []Item{worktree("application", "main"), worktree("application", "api")})
+	typeText(t, m, "api")
 	if got := selectedLabel(m); got != "application/api" {
 		t.Fatalf("selected = %q, want application/api", got)
 	}
@@ -462,13 +504,13 @@ func TestSameProjectUnderAnotherRootIsAnotherProject(t *testing.T) {
 	two := worktree("widgets", "main")
 	one.Root, api.Root, two.Root = "/one", "/one", "/two"
 	one.Path, api.Path, two.Path = "/one/widgets/main", "/one/widgets/api", "/two/widgets/main"
-	m, _ := newTestModel(t, Options{Items: []Item{one, api, two}, Here: "/two/widgets/main", Mode: ModeNew})
+	m, _ := newModelOf(t, ModelOptions{Here: at("/two/widgets/main"), Mode: ModeNew}, []Item{one, api, two})
 	for _, r := range m.rows {
 		if r.kind == rowItem && m.items[r.item].Root != "/two" {
 			t.Fatalf("new mode shows %s under %s", m.items[r.item].Label, m.items[r.item].Root)
 		}
 	}
-	m = typeText(t, m, "api")
+	typeText(t, m, "api")
 	if m.create == nil || m.create.Root != "/two" || !m.onCreate() {
 		t.Fatalf("create = %+v, want api in /two/widgets", m.create)
 	}
@@ -476,100 +518,103 @@ func TestSameProjectUnderAnotherRootIsAnotherProject(t *testing.T) {
 
 func TestBookmarkOfAWorktreeDoesNotHideIt(t *testing.T) {
 	items := append([]Item{{Kind: KindBookmark, Project: "aaa", Label: "aaa", Path: "/dev/devtools/main", Session: "aaa-main"}}, testItems()...)
-	m, _ := newTestModel(t, Options{Items: items, Here: "/dev/devtools/main"})
-	m = typeText(t, m, "fresh-feature")
+	m, _ := newModelOf(t, ModelOptions{Here: at("/dev/devtools/main")}, items)
+	typeText(t, m, "fresh-feature")
 	if m.create == nil || m.create.Project != "devtools" {
 		t.Fatalf("create = %+v noCreate = %q, want a feature in devtools", m.create, m.noCreate)
 	}
 }
 
 func TestCreateRowStaysInSightInATinyWindow(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main", Mode: ModeNew})
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 5})
-	m = typeText(t, next.(model), "popup")
-	view := ansi.Strip(m.View().Content)
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main"), Mode: ModeNew})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 5})
+	typeText(t, m, "popup")
+	view := ansi.Strip(m.View(m.width, m.height))
 	if !strings.Contains(view, "New feature popup") || !strings.Contains(view, "create") {
 		t.Fatalf("view = %q, want the create row and its footer", view)
 	}
 }
 
 func TestShowsBeforeItemsLoadThenPlacesCursor(t *testing.T) {
-	loaded := false
-	m, _ := newTestModel(t, Options{
-		Items: []Item{},
-		Load: func() ([]Item, error) {
-			loaded = true
-			return testItems(), nil
-		},
-		Here: "/dev/xcloud/main",
-	})
-	view := ansi.Strip(m.View().Content)
-	if loaded || strings.Contains(view, "Loading") || !strings.Contains(view, "Switch to a worktree") {
-		t.Fatalf("loaded=%v view=%q, want the switcher drawn before loading, quietly", loaded, view)
+	// nothing is fed until after the first view: the catalog answers late
+	m, _ := newModelOf(t, ModelOptions{Here: at("/dev/xcloud/main")}, nil)
+	view := ansi.Strip(m.View(m.width, m.height))
+	if strings.Contains(view, "Loading") || !strings.Contains(view, "Switch to a worktree") {
+		t.Fatalf("view=%q, want the switcher drawn before loading, quietly", view)
 	}
-	next, _ := m.Update(slowMsg{})
-	if view := ansi.Strip(next.(model).View().Content); !strings.Contains(view, "Loading worktrees") {
+	m.Update(slowMsg{})
+	if view := ansi.Strip(m.View(m.width, m.height)); !strings.Contains(view, "Loading worktrees") {
 		t.Fatalf("view = %q, want a loading note once it takes a while", view)
 	}
-	m, _ = run(t, m, m.loadItems())
+	feed(m, Event{Kind: Items, Items: testItems()}, Event{Kind: Complete})
 	if got := selectedLabel(m); got != "xcloud/main" {
 		t.Fatalf("selected = %q after loading, want xcloud/main", got)
 	}
 }
 
 func TestOpenModeWaitsForSessionsBeforeSayingNoneAreOpen(t *testing.T) {
-	m, _ := newTestModel(t, Options{Mode: ModeOpen})
-	next, _ := m.Update(slowMsg{})
-	m = next.(model)
-	if view := ansi.Strip(m.View().Content); strings.Contains(view, "No open workspaces") || !strings.Contains(view, "Loading open workspaces") {
+	m, _ := newTestModel(t, ModelOptions{Mode: ModeOpen})
+	m.Update(slowMsg{})
+	if view := ansi.Strip(m.View(m.width, m.height)); strings.Contains(view, "No open sessions") || !strings.Contains(view, "Loading open sessions") {
 		t.Fatalf("view = %q, want a loading note until the sessions are known", view)
 	}
-	m, _ = run(t, m, m.loadSessions())
-	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "No open workspaces") {
+	feed(m, Event{Kind: Sessions})
+	if view := ansi.Strip(m.View(m.width, m.height)); !strings.Contains(view, "No open sessions") {
 		t.Fatalf("view = %q, want no open workspaces once known", view)
 	}
 }
 
 func TestGitStateShowsPerWorktree(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
-	next, _ := m.Update(gitMsg{path: "/dev/xcloud/main", git: ui.Git{Changes: 3}})
-	m = next.(model)
-	if m.git["/dev/xcloud/main"].Changes != 3 || len(m.git) != 1 {
+	m, _ := newTestModel(t, ModelOptions{})
+	feed(m, Event{Kind: Git, Path: "/dev/xcloud/main", Git: ui.Git{Changes: 3}})
+	if m.git[gitKey{"", "/dev/xcloud/main"}].Changes != 3 || len(m.git) != 1 {
 		t.Fatalf("git = %+v, want just xcloud/main", m.git)
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), "3 changed") {
+	if !strings.Contains(ansi.Strip(m.View(m.width, m.height)), "3 changed") {
 		t.Fatal("the row did not show its changes")
 	}
 }
 
 func TestProjectQuerySelectsMainOverItsFeatures(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
 	for _, query := range []string{"xcloud", "xcl"} {
-		m, _ = press(t, m, esc)
-		m = typeText(t, m, query)
+		press(t, m, esc)
+		typeText(t, m, query)
 		if got := selectedLabel(m); got != "xcloud/main" {
 			t.Fatalf("%s: selected = %q, want xcloud/main", query, got)
 		}
 	}
 }
 
-func remoteWorktree(host, project, name string) Item {
+func remoteWorktree(machine, project, name string) Item {
 	item := worktree(project, name)
-	item.Host = host
+	item.Machine = machine
 	return item
 }
 
-// arrive feeds the items of other machines in the way they come in.
-func arrive(t *testing.T, m model, items ...[]Item) model {
-	t.Helper()
-	for _, batch := range items {
-		next, _ := m.Update(remoteMsg{items: batch})
-		m = next.(model)
+// connecting names the other machines in the order of the config, before
+// any of them answers, the way the fleet does when the hub opens.
+func connecting(m *Model, machines ...string) {
+	for _, name := range machines {
+		feed(m, Event{Machine: name, Kind: Connecting})
 	}
-	return m
 }
 
-func rowNames(m model) []string {
+// arrive feeds the items of other machines in the way they come in: each
+// batch is one machine answering with its whole catalog.
+func arrive(t *testing.T, m *Model, items ...[]Item) {
+	t.Helper()
+	for _, batch := range items {
+		machine := batch[0].Machine
+		feed(m,
+			Event{Machine: machine, Kind: Online},
+			Event{Machine: machine, Kind: Items, Items: batch},
+			Event{Machine: machine, Kind: Complete},
+		)
+	}
+}
+
+func rowNames(m *Model) []string {
 	var names []string
 	for _, r := range m.rows {
 		switch r.kind {
@@ -582,8 +627,8 @@ func rowNames(m model) []string {
 		default:
 			item := m.items[r.item]
 			name := item.Label
-			if item.Host != "" {
-				name = item.Host + ":" + name
+			if item.Machine != "" {
+				name = item.Machine + ":" + name
 			}
 			names = append(names, name)
 		}
@@ -592,8 +637,9 @@ func rowNames(m model) []string {
 }
 
 func TestOtherMachinesListAfterThisOneEachUnderItsName(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/popup-redesign"})
-	m = arrive(t, m,
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/popup-redesign")})
+	connecting(m, "macbook", "macmini")
+	arrive(t, m,
 		[]Item{remoteWorktree("macmini", "xcloud", "main"), remoteWorktree("macmini", "xcloud", "feature-net")},
 		[]Item{remoteWorktree("macbook", "kakeibo", "main")},
 	)
@@ -608,28 +654,28 @@ func TestOtherMachinesListAfterThisOneEachUnderItsName(t *testing.T) {
 }
 
 func TestOtherMachineBringsItsOwnState(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
+	m, _ := newTestModel(t, ModelOptions{})
 	item := remoteWorktree("macmini", "kakeibo", "main")
 	item.Git = ui.Git{Changes: 7}
 	item.State = ui.Session{Open: true, Agent: "blocked", Title: "Approve rm?"}
-	m = arrive(t, m, []Item{item})
-	view := ansi.Strip(m.View().Content)
+	arrive(t, m, []Item{item})
+	view := ansi.Strip(m.View(m.width, m.height))
 	for _, want := range []string{"macmini", "7 changed", "needs you", "Approve rm?"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view lacks %q:\n%s", want, view)
 		}
 	}
-	m = typeText(t, m, "kakeibo")
-	next, _ := m.Update(tab)
-	if m = next.(model); selectedLabel(m) != "kakeibo/main" {
+	typeText(t, m, "kakeibo")
+	m.Update(tab)
+	if selectedLabel(m) != "kakeibo/main" {
 		t.Fatalf("an open workspace over there is not open only: %v", rowNames(m))
 	}
 }
 
 func TestTypingAMachineListsWhatIsOnIt(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
-	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main"), remoteWorktree("macmini", "kakeibo", "budget")})
-	m = typeText(t, m, "macmini bud")
+	m, _ := newTestModel(t, ModelOptions{})
+	arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main"), remoteWorktree("macmini", "kakeibo", "budget")})
+	typeText(t, m, "macmini bud")
 	if got := strings.Join(rowNames(m), " "); got != "@macmini #kakeibo macmini:kakeibo/budget" {
 		t.Fatalf("rows = %s", got)
 	}
@@ -642,75 +688,47 @@ func TestTypingAMachineListsWhatIsOnIt(t *testing.T) {
 }
 
 func TestSamePathOverThereIsNotWhereYouAre(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/xcloud/main"})
-	m = arrive(t, m, []Item{remoteWorktree("macmini", "xcloud", "main")})
-	if here := m.items[m.here]; here.Host != "" {
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/xcloud/main")})
+	arrive(t, m, []Item{remoteWorktree("macmini", "xcloud", "main")})
+	if here := m.items[m.here]; here.Machine != "" {
 		t.Fatalf("here = %+v", here)
 	}
 	// a feature typed here starts here, not over there
-	m = typeText(t, m, "fresh")
+	typeText(t, m, "fresh")
 	if m.create == nil || m.create.Root != "/dev" || m.create.FromPath != "/dev/xcloud/main" {
 		t.Fatalf("create = %+v", m.create)
 	}
 }
 
 func TestProjectOnlyOverThereStartsNoFeatureHere(t *testing.T) {
-	m, _ := newTestModel(t, Options{Here: "/dev/devtools/main"})
-	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main")})
-	m = typeText(t, m, "kakeibo/budget")
+	m, _ := newTestModel(t, ModelOptions{Here: at("/dev/devtools/main")})
+	arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main")})
+	typeText(t, m, "kakeibo/budget")
 	if m.create != nil || !strings.Contains(m.noCreate, "on macmini") {
 		t.Fatalf("create = %+v, noCreate = %q", m.create, m.noCreate)
 	}
 }
 
 func TestFeatureOverThereCannotBeMergedFromHere(t *testing.T) {
-	m, backend := newTestModel(t, Options{})
-	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "budget")})
-	m = typeText(t, m, "budget")
-	m, _ = press(t, m, ctrlG)
+	m, backend := newTestModel(t, ModelOptions{})
+	arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "budget")})
+	typeText(t, m, "budget")
+	press(t, m, ctrlG)
 	if m.confirm != nil || len(backend.merged) != 0 || !strings.Contains(m.message, "this machine") {
 		t.Fatalf("confirm = %+v, message = %q", m.confirm, m.message)
 	}
 }
 
-func TestSwitchNoteKeepsSwitcherOpen(t *testing.T) {
-	backend := &fakeBackend{note: "Select macmini in the herdr sidebar to see it."}
-	m, _ := newTestModel(t, Options{Backend: backend, SwitchInPlace: true})
-	m = arrive(t, m, []Item{remoteWorktree("macmini", "kakeibo", "main")})
-	m = typeText(t, m, "kakeibo")
-	m, cmd := press(t, m, enter)
-	if !strings.Contains(m.busy, "on macmini") {
-		t.Fatalf("busy = %q", m.busy)
-	}
-	m, quit := run(t, m, cmd)
-	if quit || m.message != backend.note || m.failed {
-		t.Fatalf("quit = %v, message = %q", quit, m.message)
-	}
-	if len(backend.switched) != 1 || backend.switched[0].Host != "macmini" {
-		t.Fatalf("switched = %+v", backend.switched)
-	}
-}
-
-func TestRemoteStreamIsReadUntilClosed(t *testing.T) {
-	remote := make(chan []Item, 2)
-	remote <- []Item{remoteWorktree("macmini", "kakeibo", "main")}
-	close(remote)
-	m, _ := newTestModel(t, Options{Remote: remote})
-	m, _ = run(t, m, m.waitRemote())
-	if got := rowNames(m); got[len(got)-1] != "macmini:kakeibo/main" {
-		t.Fatalf("rows = %v", got)
-	}
-}
-
 func TestCursorStaysOnItsMachineWhenAnEarlierOneAnswers(t *testing.T) {
-	m, _ := newTestModel(t, Options{})
-	m = arrive(t, m, []Item{remoteWorktree("zbox", "kakeibo", "main")})
-	m = typeText(t, m, "kakeibo")
-	if item, _ := m.selectedItem(); item.Host != "zbox" {
+	m, _ := newTestModel(t, ModelOptions{})
+	connecting(m, "abox", "zbox")
+	arrive(t, m, []Item{remoteWorktree("zbox", "kakeibo", "main")})
+	typeText(t, m, "kakeibo")
+	if item, _ := m.selectedItem(); item.Machine != "zbox" {
 		t.Fatalf("selected = %+v", item)
 	}
-	m = arrive(t, m, []Item{remoteWorktree("abox", "kakeibo", "main")})
-	if item, _ := m.selectedItem(); item.Host != "zbox" {
+	arrive(t, m, []Item{remoteWorktree("abox", "kakeibo", "main")})
+	if item, _ := m.selectedItem(); item.Machine != "zbox" {
 		t.Fatalf("selected = %+v after abox answered, want still zbox", item)
 	}
 }

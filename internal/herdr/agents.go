@@ -67,12 +67,6 @@ func SortAgents(agents []Agent) {
 	})
 }
 
-// ReadAgent returns the visible screen of an agent's pane.
-func (c Client) ReadAgent(target string) (string, error) {
-	out, err := c.output("agent", "read", target, "--source", "visible", "--format", "ansi")
-	return string(out), err
-}
-
 func (c Client) FocusAgent(target string) error {
 	_, err := c.output("agent", "focus", target)
 	return err

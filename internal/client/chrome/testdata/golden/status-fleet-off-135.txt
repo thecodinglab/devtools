@@ -1,0 +1,2 @@
+size 135x1 cursor 0,0 hidden
+ desktop  devtools-main   1 zsh  2 claude ◆  3 nvim            macmini  macbook off   ◆ 1 needs you  ✓ 1 done  ● 2   Tue 17 Nov  14:32|

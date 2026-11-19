@@ -1,0 +1,10 @@
+size 80x1 cursor 0,0 hidden
+ copy   line 7,412 of 8,113   selecting lines       v select   y copy   q leave|
+styles
+0 0 6 bold reverse
+0 52 1 #a6a8b0
+0 54 6 p8
+0 63 1 #a6a8b0
+0 65 4 p8
+0 72 1 #a6a8b0
+0 74 5 p8

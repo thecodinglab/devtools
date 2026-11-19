@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+ desktop  devtools/main   No binding for ctrl+q    ? 1 needs you  + 2 done  * 1|
+styles
+0 10 13 bold

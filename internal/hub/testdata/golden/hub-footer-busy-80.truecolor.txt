@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+  Opening notes-main on macmini…|
+styles
+0 2 30 p8

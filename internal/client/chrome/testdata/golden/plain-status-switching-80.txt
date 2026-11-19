@@ -1,0 +1,4 @@
+size 80x1 cursor 0,0 hidden
+ switching  to macmini api/main...         ? 1 needs you  + 2 done  * 1   14:32|
+styles
+0 0 11 bold reverse

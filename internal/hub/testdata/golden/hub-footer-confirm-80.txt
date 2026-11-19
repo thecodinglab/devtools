@@ -1,0 +1,3 @@
+size 80x2 cursor 0,0 hidden
+  Merge fix-footer into main, then remove its worktree and branch?|
+  ⏎ merge   esc cancel|

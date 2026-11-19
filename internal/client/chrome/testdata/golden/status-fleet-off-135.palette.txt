@@ -1,0 +1,13 @@
+size 135x1 cursor 0,0 hidden
+ desktop  devtools-main   1 zsh  2 claude ◆  3 nvim            macmini  macbook off   ◆ 1 needs you  ✓ 1 done  ● 2   Tue 17 Nov  14:32|
+styles
+0 1 7 p8
+0 10 13 bold
+0 26 5 p8
+0 33 8 bold p4
+0 42 1 p3
+0 45 6 p8
+0 63 7 p8
+0 72 11 p8
+0 86 13 p3
+0 117 10 p8

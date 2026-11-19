@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ macmini  ✗ the devtools server is not running there. Typing is paused.|

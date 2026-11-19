@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+  Only a feature worktree on this machine can be merged into main.|

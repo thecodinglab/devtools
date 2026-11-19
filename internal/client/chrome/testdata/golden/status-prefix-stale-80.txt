@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ prefix                1 zsh  2 claude      macmini retrying   ◆ 1  ● 1   14:32|

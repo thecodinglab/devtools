@@ -1,0 +1,1 @@
+herdr cannot move the pane focus for devtools. A devtools window can.

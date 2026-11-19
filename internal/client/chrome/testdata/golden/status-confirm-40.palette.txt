@@ -1,0 +1,5 @@
+size 40x1 cursor 0,0 hidden
+ Close nvim?  ⏎ close pane  esc cancel|
+styles
+0 16 10 p8
+0 32 6 p8

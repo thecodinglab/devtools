@@ -1,0 +1,6 @@
+size 80x1 cursor 0,0 hidden
+ macbook  not reachable. Opening the hub again retries. Typing is paused.|
+styles
+0 0 1 reverse
+0 1 7 bold reverse
+0 8 72 reverse

@@ -1,0 +1,1 @@
+herdr cannot open a session without showing it.

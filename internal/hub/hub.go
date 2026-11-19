@@ -1,21 +1,30 @@
 // Package hub is the devtools switcher: one list of every worktree,
-// bookmark and open workspace, grouped by project, that switches to the one
-// you pick, starts a feature from what you type when nothing matches, and
-// merges a finished feature into main.
+// bookmark, open session and agent, of this machine and of the other
+// machines, grouped by project, that switches to the one you pick, starts a
+// feature from what you type when nothing matches, and merges a finished
+// feature into main.
+//
+// The hub is a model its host draws (Model, 5.3.8 of the plan): it is fed
+// by events (Event), knows which of its parts exist (Features), starts no
+// process and returns what was picked as a value. It has two hosts: the
+// overlay of a devtools window (chrome.Overlay) and RunStandalone, a
+// full-screen program for the tmux and herdr backends. Today's Run, Backend
+// and Options are an adapter onto the same model (legacy.go).
 package hub
 
 import (
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"devtools/internal/client/chrome"
+	"devtools/internal/client/screen"
 	"devtools/internal/devgit"
+	"devtools/internal/session"
 	"devtools/internal/ui"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 type Kind int
@@ -28,8 +37,8 @@ const (
 	KindRepo
 	// KindBookmark is a bookmarked directory.
 	KindBookmark
-	// KindWorkspace is an open workspace devtools did not create.
-	KindWorkspace
+	// KindSession is an open session devtools did not create.
+	KindSession
 )
 
 // Item is one place the switcher can take you.
@@ -40,22 +49,26 @@ type Item struct {
 	Label    string // project/worktree, or the name of a single item
 	Path     string
 	Root     string // the workspace root of a managed project
-	Session  string // the session or workspace label devtools gives it
-	// WorkspaceID addresses a KindWorkspace item, and State is its
-	// session: workspace labels need not be unique, so it can't be looked up
-	// by name.
-	WorkspaceID string
-	State       ui.Session
-	// Host is the machine an item is on when it is not this one. Such an
-	// item comes with its Git and State, read over there; it can be
-	// switched to but not started from or merged.
-	Host string
-	Git  ui.Git
+	Session  string // the session label devtools gives it
+	State    ui.Session
+	Git      ui.Git
+
+	// The fields of the new generation (5.3.8 of the plan), declared by
+	// contract change 1 (6.6) so that the hub feed of the fleet can build
+	// them before the model reads them.
+
+	SessionID string // today WorkspaceID; the server's id, valid on Machine only
+	Machine   string // today Host; "" is this machine
+	Tab, Pane string // ids; KindAgent
+	TabIndex  int    // KindAgent, for display
+	Agent     string // KindAgent: "claude", "codex"
+	Status    string // KindAgent: the agent's status
+	Stale     bool   // the row's machine is not online; the row cannot be picked
 }
 
 func (i Item) grouped() bool { return i.Kind == KindWorktree }
 
-func (i Item) remote() bool { return i.Host != "" }
+func (i Item) remote() bool { return i.Machine != "" }
 
 func (i Item) isMain() bool {
 	return i.Kind == KindWorktree && (i.Worktree == "main" || i.Worktree == "master")
@@ -70,109 +83,76 @@ type CreateRequest struct {
 	FromPath string
 }
 
-// Backend does the work the switcher asks for.
-type Backend interface {
-	// Status reads the git state of a worktree.
-	Status(path string) (ui.Git, error)
-	// Sessions returns the open sessions by name, and every open workspace
-	// as an item of its own; the switcher keeps those that belong to none of
-	// its items.
-	Sessions() (map[string]ui.Session, []Item, error)
-	// Switch opens or focuses the session of an item. A note says what is
-	// left for the user to do to see it, if anything.
-	Switch(item Item) (note string, err error)
-	// Create adds a feature worktree and returns it.
-	Create(req CreateRequest) (Item, error)
-	// Merge rebases a feature onto main, fast-forwards main, removes the
-	// feature worktree and returns main.
-	Merge(item Item) (Item, error)
-}
-
 type Mode int
 
 const (
 	ModeAll  Mode = iota // every worktree
-	ModeOpen             // only open workspaces
+	ModeOpen             // only open sessions; its new name ModeSessions is in event.go
 	ModeNew              // name a new feature
 )
 
-type Options struct {
-	// Items to list, or Load to read them once the switcher shows, so it
-	// shows at once however long a scan of the roots takes.
-	Items []Item
-	Load  func() ([]Item, error)
-	// Remote sends the items of other machines as each answers, one
-	// machine at a time, and is closed when no more will come.
-	Remote <-chan []Item
-	// Here is the directory the switcher was opened from.
-	Here    string
-	Mode    Mode
-	Query   string
-	Backend Backend
-	// SwitchInPlace switches from inside the switcher, which shows a failure
-	// right there. Without it Run returns the item and the caller switches,
-	// for when switching takes over the terminal.
-	SwitchInPlace bool
+// Picked is what the hub chose: the row and the target it means (the pick
+// mapping of 3.5.3). The overlay's host hands Target to the fleet; the
+// standalone host returns Item to the backend, which shows it.
+type Picked struct {
+	Item   Item
+	Target session.Target
 }
 
-// Run shows the switcher. It returns the item to switch to when the caller
-// has to switch, nil otherwise.
-func Run(opts Options) (*Item, error) {
-	// 120 frames a second, the most bubbletea allows, so the first frame
-	// and everything that loads after it show up sooner
-	final, err := tea.NewProgram(newModel(opts), tea.WithFPS(120)).Run()
-	if err != nil {
-		return nil, err
-	}
-	m := final.(model)
-	return m.result, nil
-}
-
-type rowKind int
+// scope is one of the lists the hub can show (5a.10.2).
+type scope int
 
 const (
-	rowHeader rowKind = iota
-	rowItem
-	// rowHost heads the items of another machine, under a rowSpace
-	rowHost
-	rowSpace
+	scopeAll scope = iota
+	scopeSessions
+	scopeAgents
 )
 
-// row is one line of the list: a machine or project heading, or an item.
-type row struct {
-	kind    rowKind
-	item    int // index into model.items for rowItem
-	project string
-	child   bool // a feature worktree, indented under its project
-	// rune positions the query matched, in the project and in the worktree
-	projectHits []int
-	nameHits    []int
+func (s scope) name() string {
+	switch s {
+	case scopeSessions:
+		return ui.ScopeSessions
+	case scopeAgents:
+		return ui.ScopeAgents
+	}
+	return ui.ScopeAll
 }
 
-type model struct {
-	opts    Options
-	backend Backend
-	// items are the found ones, then the open workspaces among others
-	// that belong to none of them, then the items of the other machines
-	items  []Item
-	found  []Item
-	others []Item
-	remote map[string][]Item // by machine
-	here   int               // index of the item the switcher was opened from, -1 if none
+// Model is the hub. *Model satisfies chrome.Overlay. It is not safe for
+// concurrent use: its host calls it from one goroutine.
+type Model struct {
+	opts     ModelOptions
+	features Features
+	theme    ui.Theme
+	actions  Actions
+	events   <-chan Event
 
-	itemsLoaded    bool
-	sessionsLoaded bool
+	// machines in the order of their first event: this machine first, then
+	// the others in config order (3.5.3)
+	machines []*machine
+	// sortMachines orders the other machines by name, for the legacy
+	// adapter, whose machines answer in no order (P2-09 removes it)
+	sortMachines bool
+
+	// items are every row the hub holds, joined: per machine its catalog
+	// rows (with their session), its sessions that belong to no catalog
+	// row, its agents
+	items     []Item
+	here      int // index of the item the hub was opened from, -1 if none
+	hereAgent int // index of the agent of the pane the hub was opened from, -1 if none
+	git       map[gitKey]ui.Git
+
 	// slow is set once loading has taken long enough to say so; a note
 	// that shows for a frame only flickers
 	slow bool
 
-	git      map[string]ui.Git
-	sessions map[string]ui.Session
-
-	input    textinput.Model
-	query    string // the input the rows were built for
-	openOnly bool
-	newMode  bool
+	input   textinput.Model
+	query   string // the input the rows were built for
+	scope   scope
+	newMode bool
+	// touched is set once the cursor was moved by a key, so arriving rows
+	// no longer move it to where the hub was opened from
+	touched bool
 
 	rows     []row
 	cursor   int // index into selectable(), the create row last
@@ -185,309 +165,177 @@ type model struct {
 	message string
 	failed  bool
 
-	result *Item
+	picked *Picked
 	width  int
 	height int
 }
 
-func newModel(opts Options) model {
+var _ chrome.Overlay = (*Model)(nil)
+
+type gitKey struct{ machine, path string }
+
+// New builds the hub for o. Nothing runs until Init.
+func New(o ModelOptions) *Model {
 	input := textinput.New()
-	input.Prompt = "› "
-	styles := input.Styles()
-	styles.Focused.Prompt = ui.Plain
-	styles.Focused.Text = ui.Plain
-	styles.Focused.Placeholder = ui.CommentText
-	styles.Cursor.Color = nil
-	styles.Cursor.Shape = tea.CursorBar
-	styles.Cursor.Blink = false
-	input.SetStyles(styles)
 	input.SetVirtualCursor(false)
-	input.SetValue(opts.Query)
+	input.SetValue(o.Query)
 	input.Focus()
 
-	m := model{
-		opts:     opts,
-		backend:  opts.Backend,
-		git:      map[string]ui.Git{},
-		sessions: map[string]ui.Session{},
-		input:    input,
-		openOnly: opts.Mode == ModeOpen,
-		newMode:  opts.Mode == ModeNew,
-		width:    80,
-		height:   24,
+	m := &Model{
+		opts:      o,
+		features:  o.Features,
+		theme:     o.Theme,
+		actions:   o.Actions,
+		events:    o.Events,
+		machines:  []*machine{newMachine("", "online")},
+		here:      -1,
+		hereAgent: -1,
+		git:       map[gitKey]ui.Git{},
+		input:     input,
+		width:     80,
+		height:    24,
 	}
-	if opts.Load == nil {
-		m.found = append([]Item(nil), opts.Items...)
-		m.itemsLoaded = true
+	switch o.Mode {
+	case ModeSessions:
+		m.scope = scopeSessions
+	case ModeNew:
+		m.newMode = true
+	case ModeAgents:
+		if m.features.Agents {
+			m.scope = scopeAgents
+		}
 	}
 	m.joinItems()
-	m.input.Placeholder = m.placeholder()
 	m.refilter()
 	return m
 }
 
-// joinItems lists the found items, then the open workspaces that belong to
-// none of them, then the items of the other machines by name, each machine
-// having left out its own workspaces that belong to an item.
-func (m *model) joinItems() {
-	known := make(map[string]bool, len(m.found))
-	for _, item := range m.found {
-		known[item.Session] = true
-	}
-	m.items = append([]Item(nil), m.found...)
-	for _, other := range m.others {
-		if !known[other.Session] {
-			m.items = append(m.items, other)
-		}
-	}
-	hosts := make([]string, 0, len(m.remote))
-	for host := range m.remote {
-		hosts = append(hosts, host)
-	}
-	sort.Strings(hosts)
-	for _, host := range hosts {
-		m.items = append(m.items, m.remote[host]...)
-	}
-	m.here = findHere(m.items, m.opts.Here)
+// Init starts the slow timer and the reading of the events.
+func (m *Model) Init() tea.Cmd {
+	slow := tea.Tick(ui.Slow, func(time.Time) tea.Msg { return slowMsg{} })
+	return tea.Batch(slow, m.waitEvent())
 }
 
-func (m model) placeholder() string {
-	switch {
-	case m.newMode:
-		return "Name the new feature"
-	case m.openOnly:
-		return "Switch to an open workspace"
+// Picked is the row chosen, nil while the hub is open or when it was closed
+// without a choice.
+func (m *Model) Picked() *Picked { return m.picked }
+
+// Bounds is the whole pane area: the hub covers it.
+func (m *Model) Bounds(w, h int) screen.Rect { return screen.Rect{X: 0, Y: 0, W: w, H: h} }
+
+// Draw draws the hub onto c, which is exactly Bounds.
+func (m *Model) Draw(c *screen.Canvas) {
+	w, h := c.Size()
+	for y, line := range strings.Split(m.View(w, h), "\n") {
+		c.Styled(0, y, line, w)
 	}
-	return "Switch to a worktree, or name a new feature"
 }
 
-// findHere picks the item whose directory holds dir, the deepest one when
-// they nest.
-func findHere(items []Item, dir string) int {
-	if dir == "" {
-		return -1
+// Cursor is where the terminal cursor goes: in the input, hidden while the
+// hub waits for something or asks a question.
+func (m *Model) Cursor() (x, y int, visible bool) {
+	if m.busy != "" || m.confirm != nil {
+		return 0, 0, false
 	}
-	dir = canonical(dir)
-	best, bestLen := -1, -1
-	for i, item := range items {
-		// a path over there may well exist here too
-		if item.remote() {
-			continue
-		}
-		path := canonical(item.Path)
-		rel, err := filepath.Rel(path, dir)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue
-		}
-		// the deepest wins; at the same depth a managed worktree beats a
-		// bookmark of it, so features can start there
-		if len(path) > bestLen || len(path) == bestLen && item.grouped() && !items[best].grouped() {
-			best, bestLen = i, len(path)
-		}
-	}
-	return best
+	return m.inputCursor(m.width), 0, true
 }
-
-func canonical(path string) string {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
-	}
-	return path
-}
-
-// Init starts everything that takes a while, each part showing as soon as
-// it is there: the items unless they were handed over, the git state of
-// each worktree, the open sessions.
-func (m model) Init() tea.Cmd {
-	slow := tea.Tick(slowAfter, func(time.Time) tea.Msg { return slowMsg{} })
-	remote := m.waitRemote()
-	if !m.itemsLoaded {
-		return tea.Batch(m.loadItems(), m.loadSessions(), remote, slow)
-	}
-	return tea.Batch(m.loadGit(m.found), m.loadSessions(), remote, slow)
-}
-
-// slowAfter is how long loading goes unremarked.
-const slowAfter = 150 * time.Millisecond
 
 type slowMsg struct{}
 
-type itemsMsg struct {
-	items []Item
-	err   error
-}
+// eventMsg is one event read from ModelOptions.Events.
+type eventMsg struct{ ev Event }
 
-type gitMsg struct {
-	path string
-	git  ui.Git
-}
+// eventsMsg is events the legacy adapter made; nothing waits behind it.
+type eventsMsg []Event
 
-type sessionsMsg struct {
-	sessions map[string]ui.Session
-	others   []Item
-}
-
+// doneMsg is the end of a create or a merge.
 type doneMsg struct {
 	switchTo *Item // switch here next
 	err      error
 }
 
-type switchedMsg struct {
-	note string
-	err  error
-}
-
-// remoteMsg is the items of one other machine.
-type remoteMsg struct{ items []Item }
-
-// waitRemote waits for the next machine to answer, nil when there is none
-// to wait for.
-func (m model) waitRemote() tea.Cmd {
-	remote := m.opts.Remote
-	if remote == nil {
+// waitEvent waits for the next event, nil when there is no channel.
+func (m *Model) waitEvent() tea.Cmd {
+	events := m.events
+	if events == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		items, ok := <-remote
+		ev, ok := <-events
 		if !ok {
 			return nil
 		}
-		return remoteMsg{items: items}
+		return eventMsg{ev: ev}
 	}
 }
 
-func (m model) loadItems() tea.Cmd {
-	load := m.opts.Load
-	return func() tea.Msg {
-		items, err := load()
-		return itemsMsg{items: items, err: err}
-	}
-}
-
-// loadGit reads the state of the worktrees in parallel, each showing as
-// soon as it is read, so a slow repository holds up only its own row.
-func (m model) loadGit(items []Item) tea.Cmd {
-	backend := m.backend
-	var cmds []tea.Cmd
-	for _, item := range items {
-		if item.Kind == KindWorkspace || item.Kind == KindBookmark {
-			continue
-		}
-		cmds = append(cmds, func() tea.Msg {
-			state, err := backend.Status(item.Path)
-			if err != nil {
-				return nil
-			}
-			return gitMsg{path: item.Path, git: state}
-		})
-	}
-	return tea.Batch(cmds...)
-}
-
-func (m model) loadSessions() tea.Cmd {
-	backend := m.backend
-	return func() tea.Msg {
-		sessions, others, err := backend.Sessions()
-		if err != nil {
-			return sessionsMsg{}
-		}
-		return sessionsMsg{sessions: sessions, others: others}
-	}
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles one message. A non-nil Outcome closes the hub: with
+// Switch set a row was picked (Picked says which), without it the hub was
+// closed without a choice.
+func (m *Model) Update(msg tea.Msg) (tea.Cmd, *chrome.Outcome) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		// room for the prompt, the cursor and the open only label
-		m.input.SetWidth(max(1, m.width-gutter-lipgloss.Width(m.input.Prompt)-len("open only")-4))
 		m.clampScroll()
-		return m, nil
-	case itemsMsg:
-		m.itemsLoaded = true
-		if msg.err != nil {
-			m.fail(msg.err)
-			return m, nil
+		return nil, nil
+	case ui.ThemeMsg:
+		m.theme = msg.Theme
+		return nil, nil
+	case eventMsg:
+		m.apply(msg.ev)
+		m.rejoinKeepingCursor()
+		return m.waitEvent(), nil
+	case eventsMsg:
+		for _, ev := range msg {
+			m.apply(ev)
 		}
-		m.found = msg.items
-		m.joinItems()
-		m.refilter()
-		return m, m.loadGit(m.found)
-	case gitMsg:
-		m.git[msg.path] = msg.git
-		return m, nil
+		m.rejoinKeepingCursor()
+		return nil, nil
 	case slowMsg:
 		m.slow = true
-		return m, nil
-	case sessionsMsg:
-		m.sessionsLoaded = true
-		if msg.sessions != nil {
-			m.sessions = msg.sessions
-		}
-		m.others = msg.others
 		m.rejoinKeepingCursor()
-		return m, nil
+		return nil, nil
 	case doneMsg:
+		m.busy = ""
 		if msg.err != nil {
 			m.fail(msg.err)
-			return m, nil
+			return nil, nil
 		}
-		return m.switchTo(*msg.switchTo)
-	case remoteMsg:
-		if len(msg.items) > 0 {
-			if m.remote == nil {
-				m.remote = map[string][]Item{}
-			}
-			m.remote[msg.items[0].Host] = msg.items
-			m.rejoinKeepingCursor()
-		}
-		return m, m.waitRemote()
-	case switchedMsg:
-		if msg.err != nil {
-			m.fail(msg.err)
-			return m, nil
-		}
-		if msg.note != "" {
-			m.busy, m.message = "", msg.note
-			return m, nil
-		}
-		return m, tea.Quit
+		item := *msg.switchTo
+		return m.pick(item, session.Target{Machine: item.Machine, Dir: item.Path, Name: item.Session})
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.afterInput()
-	return m, cmd
+	return cmd, nil
 }
 
-func (m *model) fail(err error) {
+func (m *Model) fail(err error) {
 	m.busy = ""
 	m.message = err.Error()
 	m.failed = true
 }
 
-func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) key(msg tea.KeyPressMsg) (tea.Cmd, *chrome.Outcome) {
 	key := msg.String()
 	// a running merge or create gets to finish, or to undo itself: quitting
 	// would leave it halfway, a rebase in progress say
 	if m.busy != "" {
-		return m, nil
+		return nil, nil
 	}
 	if key == "ctrl+c" {
-		return m, tea.Quit
+		return nil, &chrome.Outcome{}
 	}
 	if m.confirm != nil {
 		switch key {
 		case "enter":
-			return m.merge(*m.confirm)
+			return m.merge(*m.confirm), nil
 		case "esc":
 			m.confirm = nil
 		}
-		return m, nil
+		return nil, nil
 	}
 	m.message, m.failed = "", false
 	switch key {
@@ -495,114 +343,141 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.input.Value() != "" {
 			m.input.SetValue("")
 			m.afterInput()
-			return m, nil
+			return nil, nil
 		}
-		return m, tea.Quit
-	case "up", "ctrl+k", "shift+tab":
+		return nil, &chrome.Outcome{}
+	case "up", "ctrl+k":
 		m.move(-1)
-		return m, nil
+		return nil, nil
 	case "down", "ctrl+j":
 		m.move(1)
-		return m, nil
+		return nil, nil
 	case "pgup":
-		m.move(-m.listHeight())
-		return m, nil
+		m.move(-m.listHeight(m.height))
+		return nil, nil
 	case "pgdown":
-		m.move(m.listHeight())
-		return m, nil
+		m.move(m.listHeight(m.height))
+		return nil, nil
 	case "tab":
-		m.openOnly = !m.openOnly
-		m.input.Placeholder = m.placeholder()
-		m.refilter()
-		return m, nil
+		m.step(1)
+		return nil, nil
+	case "shift+tab":
+		m.step(-1)
+		return nil, nil
 	case "enter":
 		return m.activate()
 	case "ctrl+n":
-		return m.startCreate()
+		if item, ok := m.selectedItem(); ok && !m.onCreate() && item.remote() {
+			m.message = ui.CreateNotHere
+			return nil, nil
+		}
+		return m.startCreate(), nil
 	case "ctrl+g":
 		item, ok := m.selectedItem()
-		if !ok || !mergeable(item) {
-			m.message = "Only a feature worktree on this machine can be merged into main."
-			return m, nil
+		if !ok || !m.mergeable(item) {
+			m.message = ui.MergeNotHere
+			return nil, nil
 		}
 		m.confirm = &item
-		return m, nil
+		return nil, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.afterInput()
-	return m, cmd
+	return cmd, nil
 }
 
-// session is the multiplexer state of an item.
-func (m model) session(item Item) ui.Session {
-	if item.Kind == KindWorkspace || item.remote() {
-		return item.State
+// scopes is the scopes the host's features have, in the order of the
+// scope bar.
+func (m *Model) scopes() []scope {
+	if m.features.Agents {
+		return []scope{scopeAll, scopeSessions, scopeAgents}
 	}
-	return m.sessions[item.Session]
+	return []scope{scopeAll, scopeSessions}
 }
 
-// gitOf is the git state of an item.
-func (m model) gitOf(item Item) ui.Git {
-	if item.remote() {
-		return item.Git
+// step goes to the next scope (delta 1) or the previous one (-1), wrapping.
+// The query survives; naming a new feature is the all scope only.
+func (m *Model) step(delta int) {
+	scopes := m.scopes()
+	at := 0
+	for i, s := range scopes {
+		if s == m.scope {
+			at = i
+		}
 	}
-	return m.git[item.Path]
+	m.scope = scopes[(at+delta+len(scopes))%len(scopes)]
+	m.newMode = false
+	m.touched = false
+	m.refilter()
 }
 
-func mergeable(item Item) bool {
-	return item.Kind == KindWorktree && !item.isMain() && !item.remote()
+// session is the session state of an item, as the join left it.
+func (m *Model) session(item Item) ui.Session { return item.State }
+
+// gitOf is the git state of an item: what a Git event said, else what the
+// item brought.
+func (m *Model) gitOf(item Item) ui.Git {
+	if git, ok := m.git[gitKey{item.Machine, item.Path}]; ok {
+		return git
+	}
+	return item.Git
+}
+
+func (m *Model) mergeable(item Item) bool {
+	return m.actions != nil && item.Kind == KindWorktree && !item.isMain() && !item.remote()
 }
 
 // afterInput refilters when an edit changed the query.
-func (m *model) afterInput() {
+func (m *Model) afterInput() {
 	if m.input.Value() != m.query {
+		m.touched = false
 		m.refilter()
 	}
 }
 
 // activate does what enter means on the selected row.
-func (m model) activate() (tea.Model, tea.Cmd) {
+func (m *Model) activate() (tea.Cmd, *chrome.Outcome) {
 	if m.onCreate() {
-		return m.startCreate()
+		return m.startCreate(), nil
 	}
 	item, ok := m.selectedItem()
 	if !ok {
-		return m, nil
+		return nil, nil
 	}
-	return m.switchTo(item)
+	return m.pick(item, target(item))
 }
 
-func (m model) switchTo(item Item) (tea.Model, tea.Cmd) {
-	if !m.opts.SwitchInPlace {
-		m.result = &item
-		return m, tea.Quit
+// target is what picking a row means (3.5.3).
+func target(item Item) session.Target {
+	switch {
+	case item.Kind == KindAgent:
+		return session.Target{Machine: item.Machine, Session: item.SessionID, Tab: item.Tab, Pane: item.Pane}
+	case item.SessionID != "":
+		return session.Target{Machine: item.Machine, Session: item.SessionID}
 	}
-	backend := m.backend
-	m.busy = "Opening " + item.Label + "…"
-	if item.remote() {
-		m.busy = "Opening " + item.Label + " on " + item.Host + "…"
-	}
-	return m, func() tea.Msg {
-		note, err := backend.Switch(item)
-		return switchedMsg{note: note, err: err}
-	}
+	return session.Target{Machine: item.Machine, Dir: item.Path, Name: item.Session}
 }
 
-func (m model) startCreate() (tea.Model, tea.Cmd) {
+func (m *Model) pick(item Item, t session.Target) (tea.Cmd, *chrome.Outcome) {
+	m.picked = &Picked{Item: item, Target: t}
+	return nil, &chrome.Outcome{Switch: &t}
+}
+
+func (m *Model) startCreate() tea.Cmd {
 	if m.create == nil {
 		if m.noCreate != "" {
 			m.message = m.noCreate
 		} else {
-			m.message = "Type a name for the feature first."
+			m.message = ui.Empty("name", "")
 		}
-		return m, nil
+		return nil
 	}
 	req := *m.create
-	backend := m.backend
-	m.busy = "Creating " + req.Branch + " in " + req.Project + "…"
-	return m, func() tea.Msg {
-		item, err := backend.Create(req)
+	actions := m.actions
+	m.busy = ui.Busy("create", req.Branch, req.Project)
+	return func() tea.Msg {
+		item, err := actions.Create(req)
 		if err != nil {
 			return doneMsg{err: err}
 		}
@@ -610,12 +485,12 @@ func (m model) startCreate() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m model) merge(item Item) (tea.Model, tea.Cmd) {
+func (m *Model) merge(item Item) tea.Cmd {
 	m.confirm = nil
-	backend := m.backend
-	m.busy = "Merging " + item.Worktree + " into main…"
-	return m, func() tea.Msg {
-		main, err := backend.Merge(item)
+	actions := m.actions
+	m.busy = ui.Busy("merge", item.Worktree)
+	return func() tea.Msg {
+		main, err := actions.Merge(item)
 		if err != nil {
 			return doneMsg{err: err}
 		}
@@ -623,19 +498,19 @@ func (m model) merge(item Item) (tea.Model, tea.Cmd) {
 	}
 }
 
-// selectable is the rows the cursor can stop on: the items, then the
-// create row when there is one.
-func (m model) selectable() []int {
+// selectable is the rows the cursor can stop on: the items whose machine
+// is online, then the create row when there is one.
+func (m *Model) selectable() []int {
 	var rows []int
 	for i, r := range m.rows {
-		if r.kind == rowItem {
+		if r.kind == rowItem && !m.items[r.item].Stale {
 			rows = append(rows, i)
 		}
 	}
 	return rows
 }
 
-func (m model) selectableCount() int {
+func (m *Model) selectableCount() int {
 	n := len(m.selectable())
 	if m.create != nil {
 		n++
@@ -643,11 +518,11 @@ func (m model) selectableCount() int {
 	return n
 }
 
-func (m model) onCreate() bool {
+func (m *Model) onCreate() bool {
 	return m.create != nil && m.cursor == len(m.selectable())
 }
 
-func (m model) selectedItem() (Item, bool) {
+func (m *Model) selectedItem() (Item, bool) {
 	rows := m.selectable()
 	if m.cursor < 0 || m.cursor >= len(rows) {
 		return Item{}, false
@@ -655,203 +530,60 @@ func (m model) selectedItem() (Item, bool) {
 	return m.items[m.rows[rows[m.cursor]].item], true
 }
 
-func (m *model) move(delta int) {
+func (m *Model) move(delta int) {
 	n := m.selectableCount()
 	if n == 0 {
 		return
 	}
+	m.touched = true
 	m.cursor = max(0, min(n-1, m.cursor+delta))
 	m.clampScroll()
 }
 
+// identity is what makes a row the same row when the rows are built anew
+// (H7): its machine and path, or its machine and pane.
+func identity(i Item) string {
+	switch i.Kind {
+	case KindAgent:
+		return "a\x00" + i.Machine + "\x00" + i.Pane
+	case KindSession:
+		return "s\x00" + i.Machine + "\x00" + i.SessionID + "\x00" + i.Path + "\x00" + i.Label
+	}
+	return "c\x00" + string(rune('0'+i.Kind)) + "\x00" + i.Machine + "\x00" + i.Path + "\x00" + i.Label
+}
+
 // rejoinKeepingCursor joins the items anew and keeps the cursor on the
 // item it was on. The rows point into the items by index, so the selected
-// item is read before joining reorders them.
-func (m *model) rejoinKeepingCursor() {
+// item is read before joining reorders them. Until a key moved the cursor,
+// it goes where the hub was opened from once that row is there.
+func (m *Model) rejoinKeepingCursor() {
 	selected, ok := m.selectedItem()
 	onCreate := m.onCreate()
 	m.joinItems()
 	m.refilter()
-	if onCreate {
-		m.cursor = len(m.selectable())
-	} else if ok {
-		for i, r := range m.selectable() {
-			if item := m.items[m.rows[r].item]; item.Path == selected.Path && item.Label == selected.Label && item.WorkspaceID == selected.WorkspaceID && item.Host == selected.Host {
-				m.cursor = i
-			}
-		}
-	}
-	m.clampScroll()
-}
-
-type scored struct {
-	item        int
-	score       int
-	projectHits []int
-	nameHits    []int
-}
-
-// refilter rebuilds the rows for the query and puts the cursor where enter
-// most likely means: on the best match, on where you are when nothing is
-// typed, or on the create row when nothing matches or a feature is asked
-// for.
-func (m *model) refilter() {
-	m.query = m.input.Value()
-	query := strings.TrimSpace(m.query)
-	m.create, m.noCreate = m.createRequest(query)
-
-	var matches []scored
-	for i, item := range m.items {
-		if m.openOnly && !m.session(item).Open {
-			continue
-		}
-		if m.newMode && m.here >= 0 && m.items[m.here].grouped() && !sameProject(item, m.items[m.here]) {
-			continue
-		}
-		// an item over there matches by its machine too, so typing the
-		// machine lists what is on it
-		text := item.Label
-		if item.remote() {
-			text = item.Host + "/" + item.Label
-		}
-		score, hits, ok := match(query, text)
-		if !ok {
-			continue
-		}
-		if item.remote() {
-			hits = shift(hits, len([]rune(item.Host))+1)
-		}
-		s := scored{item: i, score: score}
-		if item.grouped() {
-			cut := len([]rune(item.Project)) + 1
-			for _, h := range hits {
-				if h < cut-1 {
-					s.projectHits = append(s.projectHits, h)
-				} else if h >= cut {
-					s.nameHits = append(s.nameHits, h-cut)
-				}
-			}
-		} else {
-			s.nameHits = hits
-		}
-		matches = append(matches, s)
-	}
-
-	// groups keep the order of the items when nothing is typed, and are
-	// ranked by their best match otherwise
-	type group struct {
-		project string
-		host    string
-		best    int
-		first   int
-		members []scored
-	}
-	var groups []*group
-	byProject := map[string]*group{}
-	for order, s := range matches {
-		item := m.items[s.item]
-		key := "\x00" + item.Host + "\x00" + item.Label + "\x00" + item.WorkspaceID
-		if item.grouped() {
-			key = item.Host + "\x00" + item.Root + "\x00" + item.Project
-		}
-		g, ok := byProject[key]
-		if !ok {
-			g = &group{project: item.Project, best: s.score, first: order, host: item.Host}
-			byProject[key] = g
-			groups = append(groups, g)
-		}
-		g.best = max(g.best, s.score)
-		g.members = append(g.members, s)
-	}
-	if query != "" {
-		sort.SliceStable(groups, func(i, j int) bool { return groups[i].best > groups[j].best })
-		for _, g := range groups {
-			sort.SliceStable(g.members, func(i, j int) bool { return g.members[i].score > g.members[j].score })
-		}
-	}
-	// this machine comes first, then every other one in its own section
-	sort.SliceStable(groups, func(i, j int) bool {
-		return groups[i].host == "" && groups[j].host != "" || groups[i].host != "" && groups[j].host != "" && groups[i].host < groups[j].host
-	})
-
-	// a project is one row, its main worktree, with its features indented
-	// below; when main is filtered out or missing, a heading stands in
-	m.rows = m.rows[:0]
-	host := ""
-	for _, g := range groups {
-		if g.host != host {
-			if len(m.rows) > 0 {
-				m.rows = append(m.rows, row{kind: rowSpace})
-			}
-			m.rows = append(m.rows, row{kind: rowHost, project: g.host})
-			host = g.host
-		}
-		if !m.items[g.members[0].item].grouped() {
-			for _, s := range g.members {
-				m.rows = append(m.rows, row{kind: rowItem, item: s.item, project: g.project, nameHits: s.nameHits})
-			}
-			continue
-		}
-		var hits []int
-		parent := -1
-		for i, s := range g.members {
-			hits = append(hits, s.projectHits...)
-			if m.items[s.item].isMain() && parent < 0 {
-				parent = i
-			}
-		}
-		if parent >= 0 {
-			s := g.members[parent]
-			m.rows = append(m.rows, row{kind: rowItem, item: s.item, project: g.project, projectHits: dedupe(hits)})
-		} else {
-			m.rows = append(m.rows, row{kind: rowHeader, project: g.project, projectHits: dedupe(hits)})
-		}
-		for i, s := range g.members {
-			if i != parent {
-				m.rows = append(m.rows, row{kind: rowItem, item: s.item, project: g.project, child: true, nameHits: s.nameHits})
-			}
-		}
-	}
-
-	m.cursor = 0
 	switch {
-	case m.newMode || (query != "" && len(matches) == 0):
+	case onCreate:
 		m.cursor = len(m.selectable())
-	case query != "":
-		// the best match, the topmost row among equals, so a query naming
-		// only the project lands on its main worktree rather than a
-		// feature listed below it
-		scores := make(map[int]int, len(matches))
-		best := matches[0].score
-		for _, s := range matches {
-			scores[s.item] = s.score
-			best = max(best, s.score)
-		}
+	case ok && (m.touched || m.here < 0 || m.query != "" || m.scope == scopeAgents):
+		want := identity(selected)
 		for i, r := range m.selectable() {
-			if score, ok := scores[m.rows[r].item]; ok && score == best {
+			if identity(m.items[m.rows[r].item]) == want {
 				m.cursor = i
 				break
 			}
 		}
-	case query == "" && m.here >= 0:
-		for i, r := range m.selectable() {
-			if m.rows[r].item == m.here {
-				m.cursor = i
-			}
-		}
 	}
-	if m.cursor >= m.selectableCount() {
-		m.cursor = max(0, m.selectableCount()-1)
-	}
-	m.offset = 0
 	m.clampScroll()
 }
 
 // createRequest turns the query into a feature to create: in the project
 // you are in, from the worktree you are in, or in the project the query
 // names before a slash, from its main worktree.
-func (m model) createRequest(query string) (*CreateRequest, string) {
-	if query == "" {
+//
+// The two texts of noCreate are today's (hub.go before P2-07); internal/ui
+// has no words for them yet, and the tests of the legacy hub pin them.
+func (m *Model) createRequest(query string) (*CreateRequest, string) {
+	if query == "" || m.actions == nil || m.scope == scopeAgents {
 		return nil, ""
 	}
 	branch := strings.Join(strings.Fields(query), "-")
@@ -860,8 +592,8 @@ func (m model) createRequest(query string) (*CreateRequest, string) {
 	if project, rest, ok := strings.Cut(branch, "/"); ok && rest != "" {
 		if main := m.mainOf(project); main != nil {
 			from, branch = main, rest
-		} else if host := m.hostOf(project); host != "" {
-			return nil, project + " is on " + host + ", start its features over there."
+		} else if machine := m.machineOf(project); machine != "" {
+			return nil, project + " is on " + machine + ", start its features over there."
 		}
 	}
 	if from == nil && m.here >= 0 && m.items[m.here].grouped() {
@@ -889,13 +621,13 @@ func (m model) createRequest(query string) (*CreateRequest, string) {
 // project of the same name under another root or on another machine is
 // another project.
 func sameProject(a, b Item) bool {
-	return a.grouped() && b.grouped() && a.Project == b.Project && a.Root == b.Root && a.Host == b.Host
+	return a.grouped() && b.grouped() && a.Project == b.Project && a.Root == b.Root && a.Machine == b.Machine
 }
 
 // mainOf returns the main worktree of a managed project on this machine,
 // or any of its worktrees when it has none. Of projects with the name under
 // several roots it prefers the one you are in.
-func (m model) mainOf(project string) *Item {
+func (m *Model) mainOf(project string) *Item {
 	root := ""
 	if m.here >= 0 && m.items[m.here].grouped() && m.items[m.here].Project == project {
 		root = m.items[m.here].Root
@@ -916,12 +648,71 @@ func (m model) mainOf(project string) *Item {
 	return any
 }
 
-// hostOf names the other machine a managed project is on, if it is on one.
-func (m model) hostOf(project string) string {
+// machineOf names the other machine a managed project is on, if it is on
+// one.
+func (m *Model) machineOf(project string) string {
 	for _, item := range m.items {
 		if item.remote() && item.grouped() && item.Project == project {
-			return item.Host
+			return item.Machine
 		}
 	}
 	return ""
+}
+
+// findHere picks the item whose directory holds dir, the deepest one when
+// they nest, among the items of the machine the hub was opened on.
+func (m *Model) findHere() int {
+	dir := m.opts.Here.Dir
+	if dir == "" {
+		return -1
+	}
+	local := m.opts.Here.Machine == ""
+	clean := func(p string) string {
+		if local {
+			return canonical(p)
+		}
+		return filepath.Clean(p)
+	}
+	dir = clean(dir)
+	best, bestLen := -1, -1
+	for i, item := range m.items {
+		// a path over there may well exist here too
+		if item.Machine != m.opts.Here.Machine || item.Kind == KindAgent || item.Path == "" {
+			continue
+		}
+		path := clean(item.Path)
+		rel, err := filepath.Rel(path, dir)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		// the deepest wins; at the same depth a managed worktree beats a
+		// bookmark of it, so features can start there
+		if len(path) > bestLen || len(path) == bestLen && item.grouped() && !m.items[best].grouped() {
+			best, bestLen = i, len(path)
+		}
+	}
+	return best
+}
+
+// findHereAgent picks the agent of the pane the hub was opened from.
+func (m *Model) findHereAgent() int {
+	if m.opts.Here.Pane == "" {
+		return -1
+	}
+	for i, item := range m.items {
+		if item.Kind == KindAgent && item.Machine == m.opts.Here.Machine && item.Pane == m.opts.Here.Pane {
+			return i
+		}
+	}
+	return -1
+}
+
+func canonical(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	return path
 }

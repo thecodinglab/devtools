@@ -1,0 +1,9 @@
+size 18x5 cursor 0,0 hidden
+|
+ Window too small|
+  20 by 6 needed|
+|
+|
+styles
+1 1 16 p8
+2 2 14 p8

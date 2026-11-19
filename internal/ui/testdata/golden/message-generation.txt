@@ -1,0 +1,2 @@
+The devtools server is from another version of devtools.
+Restart it with: devtools server restart (this ends 7 panes)
