@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,11 +97,27 @@ func TestRefuseNamesBothGenerations(t *testing.T) {
 	h := prototest.Interactive()
 	h.Gen = 3
 	text := refused(t, ts.socket, h, proto.CodeGeneration)
-	if !strings.Contains(text, "protocol 2") || !strings.Contains(text, "protocol 3") {
+	if !strings.Contains(text, "protocol 1") || !strings.Contains(text, "protocol 3") {
 		t.Fatalf("refuse text %q does not name both generations", text)
 	}
 	h.Gen, h.Kind = proto.Gen, "window"
 	refused(t, ts.socket, h, proto.CodeInvalid)
+}
+
+// A client of generation 2 (the builds that named the tree layout so) is
+// welcomed in its own generation, which is what it checks for, and finds
+// the tree layout among the caps.
+func TestAClientOfGenerationTwoIsWelcomedInItsOwn(t *testing.T) {
+	ts := newTestServer(t)
+	h := prototest.Interactive()
+	h.Gen = 2
+	w := prototest.Dial(t, ts.socket, h).Welcome()
+	if w.Gen != 2 || !slices.Contains(w.Caps, proto.CapTree) || !slices.Contains(w.Caps, proto.CapStateGet) {
+		t.Fatalf("welcome %+v, want generation 2 with tree and stateget", w)
+	}
+	if w := ts.oneshot().Welcome(); w.Gen != proto.Gen {
+		t.Fatalf("a generation %d hello was welcomed with %d", proto.Gen, w.Gen)
+	}
 }
 
 func TestWelcomeCarriesBootHostPidAndClientCount(t *testing.T) {

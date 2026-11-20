@@ -268,10 +268,20 @@ func TestEveryFailureReasonIsClassified(t *testing.T) {
 		ch := dialAsync(localDialer(srv, localHello(), nil), "")
 		srv.Accept().Send(proto.Welcome{Gen: 3, Version: "3.0.0", Boot: "b", Host: "h"})
 		f := failed(t, ch)
-		if f.Reason != Incompatible || !strings.Contains(f.Text, "3") || !strings.Contains(f.Text, "2") {
+		if f.Reason != Incompatible || !strings.Contains(f.Text, "3") || !strings.Contains(f.Text, "1") {
 			t.Fatalf("failure = %+v, want incompatible naming both generations", f)
 		}
 		seen[Incompatible] = true
+	})
+	t.Run("a welcome of generation 2 is accepted", func(t *testing.T) {
+		srv := prototest.NewServer(t)
+		ch := dialAsync(localDialer(srv, localHello(), nil), "")
+		p := srv.Accept()
+		p.Send(proto.Welcome{Gen: 2, Version: "2.0.0", Boot: "b", Host: "h", Caps: []string{proto.CapTree}})
+		p.Send(snapshot())
+		if w := online(t, ch).Welcome(); w.Gen != 2 || len(w.Caps) != 1 {
+			t.Fatalf("Welcome() = %+v", w)
+		}
 	})
 	t.Run("incompatible, refuse generation", func(t *testing.T) {
 		srv := prototest.NewServer(t)
@@ -285,6 +295,16 @@ func TestEveryFailureReasonIsClassified(t *testing.T) {
 		kind, _, f := readMarker(bufio.NewReader(strings.NewReader("banner\ndevtools-bridge-ready 3\n")))
 		if kind != markerFail || f == nil || f.Reason != Incompatible {
 			t.Fatalf("readMarker = %v %+v, want incompatible", kind, f)
+		}
+	})
+	t.Run("a bridge of generation 2 is ready", func(t *testing.T) {
+		kind, line, f := readMarker(bufio.NewReader(strings.NewReader("banner\ndevtools-bridge-ready 2\n")))
+		if kind != markerReady || f != nil || line != "devtools-bridge-ready 2" {
+			t.Fatalf("readMarker = %v %q %+v, want ready", kind, line, f)
+		}
+		kind, _, _ = readMarker(bufio.NewReader(strings.NewReader("devtools-bridge-ready 02\ndevtools-bridge-ready 1\n")))
+		if kind != markerReady {
+			t.Fatalf("readMarker = %v, want ready on the second line", kind)
 		}
 	})
 	t.Run("protocol, more than 64 KiB before the marker", func(t *testing.T) {

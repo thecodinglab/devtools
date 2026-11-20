@@ -18,8 +18,16 @@ func TestLimitsAreTheValuesOfSectionFour(t *testing.T) {
 			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
 		}
 	}
-	if Gen != 2 {
+	if Gen != 1 {
 		t.Errorf("Gen = %d", Gen)
+	}
+}
+
+func TestSpeaksGenerationsOneAndTwo(t *testing.T) {
+	for g, want := range map[int]bool{0: false, 1: true, 2: true, 3: false, -1: false} {
+		if Speaks(g) != want {
+			t.Errorf("Speaks(%d) = %v, want %v", g, !want, want)
+		}
 	}
 }
 

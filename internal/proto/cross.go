@@ -3,16 +3,22 @@ package proto
 // The messages that reach past one window and one server: the requests a
 // command in a pane routes to the window that displays it (4.2.10), the
 // catalog stream of what a machine offers to open (4.3), and event.agent
-// (4.2.8); and the wire capabilities of generation 1 (4.1).
+// (4.2.8); and the wire capabilities (4.1).
 
-// Wire capabilities of generation 1 (4.1). They travel in hello.caps and
-// welcome.caps; a side uses a family only when it is in both lists. They are
+// Wire capabilities (4.1). They travel in hello.caps and welcome.caps; a
+// side uses a family only when it is in both lists, and a new feature of
+// the protocol is a new capability, not a new generation (Gen). They are
 // not the backend capabilities of internal/mux, and no name is shared.
 const (
 	CapCatalog  = "catalog"  // the catalog stream (4.3)
 	CapAgents   = "agents"   // agent records and event.agent
 	CapRoute    = "route"    // the ui.* requests (4.2.10)
 	CapStateGet = "stateget" // state.get
+	// CapTree: a tab of any number of panes, Tab.Layout and pane.resize. A
+	// server without it holds at most two panes in a tab and sends no
+	// layout (Tab.Tree reads its tabs); a receiver without it ignores the
+	// layout field.
+	CapTree = "tree"
 )
 
 // Message types of cross.go.

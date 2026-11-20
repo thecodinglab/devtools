@@ -146,7 +146,7 @@ func (t *tail) Bytes() []byte {
 type markerResult int
 
 const (
-	markerReady markerResult = iota // the ready line of this generation
+	markerReady markerResult = iota // the ready line of a generation this build speaks
 	markerError                     // a devtools-bridge-error line
 	markerEnd                       // the stream ended before either
 	markerFail                      // a Failure: too much before the line, another generation
@@ -179,11 +179,12 @@ func readMarker(r *bufio.Reader) (markerResult, string, *Failure) {
 		}
 		l := strings.TrimSuffix(string(line), "\r")
 		switch {
-		case l == readyLine && len(line) <= maxLine:
-			return markerReady, l, nil
 		case strings.HasPrefix(l, readyPrefix) && len(line) <= maxLine:
 			gen := strings.TrimPrefix(l, readyPrefix)
-			if n, err := strconv.Atoi(gen); err == nil && n != protoGen {
+			if n, err := strconv.Atoi(gen); err == nil && strconv.Itoa(n) == gen {
+				if proto.Speaks(n) {
+					return markerReady, l, nil
+				}
 				return markerFail, l, failure(Incompatible,
 					"the bridge speaks protocol "+strconv.Itoa(n)+", this client "+strconv.Itoa(protoGen), "")
 			}

@@ -95,7 +95,7 @@ func newMachine(t testing.TB, name string) *Machine {
 		welcome: proto.Welcome{
 			Gen:     proto.Gen,
 			Version: "test",
-			Caps:    []string{proto.CapCatalog, proto.CapAgents, proto.CapRoute, proto.CapStateGet},
+			Caps:    []string{proto.CapCatalog, proto.CapAgents, proto.CapRoute, proto.CapStateGet, proto.CapTree},
 			Boot:    boot,
 			Host:    host,
 			Pid:     1,

@@ -14,9 +14,20 @@ import (
 	"devtools/internal/proto/prototest"
 )
 
-func TestGenerationMismatchIsRefusedWithText(t *testing.T) {
+// A hello of a generation the server speaks is welcomed in that
+// generation, whatever its caps; only one it cannot read is refused.
+func TestAnOlderGenerationIsWelcomedAndAnUnknownOneRefused(t *testing.T) {
 	_, socket := startServer(t)
-	for _, gen := range []int{proto.Gen + 1, 0} {
+	for _, gen := range []int{1, 2} {
+		r := dialRaw(t, socket)
+		r.send(fmt.Sprintf(`{"t":"hello","gen":%d,"version":"0.1.0","kind":"interactive"}`, gen))
+		m := r.next()
+		var w proto.Welcome
+		if m.T != proto.TypeWelcome || m.Decode(&w) != nil || w.Gen != gen {
+			t.Fatalf("a hello of generation %d was answered %s", gen, m.Body)
+		}
+	}
+	for _, gen := range []int{3, 0} {
 		r := dialRaw(t, socket)
 		r.send(fmt.Sprintf(`{"t":"hello","gen":%d,"version":"9.0.0","kind":"interactive"}`, gen))
 		m := r.next()

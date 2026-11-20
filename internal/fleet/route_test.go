@@ -137,6 +137,27 @@ func TestARequestGoesToTheShownServerAndItsReplyComesBack(t *testing.T) {
 	}
 }
 
+// A server whose welcome lacks a family is used for what it has: a request
+// of that family is answered unsupported without reaching it, the others
+// go through.
+func TestARequestOfAFamilyTheServerLacksIsAnsweredLocally(t *testing.T) {
+	r := startShowing(t, "M connect")
+	w := r.M("M").Welcome()
+	w.Gen, w.Caps = 2, []string{proto.CapStateGet}
+	r.M("M").SetWelcome(w)
+	online(t, r, "M", fleettest.Snapshot(ss(2)))
+	show(t, r, "M", 2)
+	rep, ok := proto.AsReply(<-r.F.Request(proto.Request(5, proto.PaneResize{Pane: "p2", Direction: "left", Cells: 5})))
+	if !ok || rep.OK || rep.Code != proto.CodeUnsupported || rep.Msg.ID != 5 || rep.Text != "resizing panes needs a newer devtools server" {
+		t.Fatalf("reply %+v, want err unsupported", rep)
+	}
+	if n := len(r.M("M").SentOf(proto.TypePaneResize)); n != 0 {
+		t.Fatalf("pane.resize reached a server without the tree family %d times", n)
+	}
+	r.F.Request(proto.Request(6, proto.PaneSplit{Pane: "p2", Direction: proto.SplitRight}))
+	r.Eventually("pane.split on M", func() bool { return len(r.M("M").SentOf(proto.TypePaneSplit)) == 1 })
+}
+
 func TestAnErrReplyIsSanitised(t *testing.T) {
 	r := startShowing(t)
 	reply := r.F.Request(proto.Request(3, proto.PaneClose{Pane: "p1"}))

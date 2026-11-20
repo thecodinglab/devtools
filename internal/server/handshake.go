@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"time"
 
@@ -42,7 +43,9 @@ func (s *Server) handshake(nc net.Conn) {
 	case m.Decode(&h) != nil:
 		s.refuse(nc, proto.CodeInvalid, "the hello does not decode")
 		return
-	case h.Gen != proto.Gen:
+	case !proto.Speaks(h.Gen):
+		// Only a generation whose bytes this build cannot read is refused;
+		// what the client lacks or has beyond this server is in the caps.
 		s.refuse(nc, proto.CodeGeneration, fmt.Sprintf("this server speaks protocol %d, the client protocol %d", proto.Gen, h.Gen))
 		return
 	case h.Kind != proto.KindInteractive && h.Kind != proto.KindOneshot:
@@ -125,7 +128,7 @@ func (c *core) admit(nc net.Conn, h proto.Hello) (*conn, string, string) {
 	c.s.conns[cn] = true
 	c.s.mu.Unlock()
 	c.send(cn, proto.Encode(proto.Welcome{
-		Gen:     proto.Gen,
+		Gen:     h.Gen, // the client's, which this server speaks: an older client checks for its own
 		Version: c.s.o.Version,
 		Caps:    c.caps(),
 		Boot:    c.s.boot,
@@ -169,12 +172,12 @@ func (c *core) paneOfProcess(id string, ancestors []int) bool {
 	return info.Pid > 0 && contains(ancestors, info.Pid)
 }
 
-// caps are welcome.caps: stateget, which the core answers, and what the
-// extensions add.
+// caps are welcome.caps: stateget and tree, which the core implements,
+// and what the extensions add.
 func (c *core) caps() []string {
-	caps := []string{proto.CapStateGet}
+	caps := []string{proto.CapStateGet, proto.CapTree}
 	for _, x := range extensionCaps() {
-		if x != proto.CapStateGet {
+		if !slices.Contains(caps, x) {
 			caps = append(caps, x)
 		}
 	}

@@ -201,7 +201,7 @@ func TestHarnessFakeSSHFailsLikeEachReason(t *testing.T) {
 		}},
 		{"incompatible", func(r Result) bool { return strings.Contains(r.Stderr, `unknown command "bridge"`) }},
 		{"protocol", func(r Result) bool {
-			i := strings.Index(r.Stdout, "devtools-bridge-ready 2\n")
+			i := strings.Index(r.Stdout, "devtools-bridge-ready 1\n")
 			return i > 64<<10
 		}},
 	} {

@@ -188,9 +188,11 @@ func handshake(r io.Reader, w io.Writer, hello proto.Hello, lost func(error) *Fa
 		if err := m.Decode(&welcome); err != nil {
 			return proto.Welcome{}, nil, failure(Protocol, "invalid welcome", "")
 		}
-		if welcome.Gen != proto.Gen {
+		// A server answers in the generation of the hello; what it can do
+		// is in welcome.caps, which the fleet reads.
+		if !proto.Speaks(welcome.Gen) {
 			return proto.Welcome{}, nil, failure(Incompatible,
-				fmt.Sprintf("the server speaks protocol %d, this client %d", welcome.Gen, proto.Gen), "")
+				fmt.Sprintf("the server speaks protocol %d, this client %d", welcome.Gen, hello.Gen), "")
 		}
 	case proto.TypeRefuse:
 		var ref proto.Refuse

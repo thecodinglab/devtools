@@ -1,1 +1,1 @@
-{"t":"hello","gen":2,"version":"0.9.0","caps":["catalog","agents","route","stateget"],"kind":"interactive","remote":false,"tty":"/dev/pts/7","ancestors":[4121,4100,1],"env":{"DISPLAY":":0","WAYLAND_DISPLAY":"wayland-1"},"colors":{"fg":"#c0caf5","bg":"#1a1b26","dark":true}}
+{"t":"hello","gen":1,"version":"0.9.0","caps":["catalog","agents","route","stateget","tree"],"kind":"interactive","remote":false,"tty":"/dev/pts/7","ancestors":[4121,4100,1],"env":{"DISPLAY":":0","WAYLAND_DISPLAY":"wayland-1"},"colors":{"fg":"#c0caf5","bg":"#1a1b26","dark":true}}

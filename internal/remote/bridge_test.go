@@ -71,7 +71,7 @@ func startBridge(t *testing.T, socket string) *bridgeRun {
 func (b *bridgeRun) ready(t *testing.T) {
 	t.Helper()
 	line, err := b.stdout.ReadString('\n')
-	if err != nil || line != "devtools-bridge-ready 2\n" {
+	if err != nil || line != "devtools-bridge-ready 1\n" {
 		t.Fatalf("first line %q (%v), want the ready line", line, err)
 	}
 }
@@ -154,7 +154,7 @@ func TestBridgeCopiesBytesUntouched(t *testing.T) {
 			all = append(all, byte(c))
 		}
 	}
-	up := append(append([]byte(nil), all...), "devtools-bridge-ready 2\n\x1b[?1049h\r\n"...)
+	up := append(append([]byte(nil), all...), "devtools-bridge-ready 1\n\x1b[?1049h\r\n"...)
 	down := append([]byte("\x00\x00\x00\x05{\"t\":"), all...)
 
 	go b.stdin.Write(up)

@@ -1,8 +1,30 @@
 package proto
 
-// Gen is the protocol generation (4.1). A peer with another generation is
-// refused with a text that names both.
-const Gen = 2
+// Gen is the protocol generation (4.1): the framing, the envelope and the
+// handshake, nothing else. It stays 1. A feature is a capability (cross.go):
+// the server lists what it implements in welcome.caps, the client in
+// hello.caps, and each side uses a family only when both list it, so an
+// older peer is still served with what it has instead of being refused.
+// Bump Gen only for a change that no capability can describe, one that
+// makes the bytes themselves unreadable to the other side.
+const Gen = 1
+
+// gens are the generations this build speaks: Gen, and 2, which the builds
+// of 20 November 2026 named the tree layout (CapTree) with; it frames
+// exactly as 1 does.
+var gens = [...]int{Gen, 2}
+
+// Speaks reports whether this build reads and writes generation g. A
+// server answers a hello of such a generation with a welcome of the same
+// one, so a peer that checks for its own generation accepts it.
+func Speaks(g int) bool {
+	for _, x := range gens {
+		if x == g {
+			return true
+		}
+	}
+	return false
+}
 
 // Limits of 4.1, enforced by both sides.
 const (

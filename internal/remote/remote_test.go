@@ -105,7 +105,7 @@ func fakeSSH(args []string) int {
 // mention of the ready line that is not at the start of a line. Each line
 // ends in "\n" unless noline is set, and so does the whole.
 func garbage(n int, noline bool) []byte {
-	line := []byte("motd \x1b[1;31mWelcome\x1b[0m \x00\xff\xfe say devtools-bridge-ready 2 here\x07\n")
+	line := []byte("motd \x1b[1;31mWelcome\x1b[0m \x00\xff\xfe say devtools-bridge-ready 1 here\x07\n")
 	out := make([]byte, 0, n)
 	for len(out) < n {
 		out = append(out, line...)

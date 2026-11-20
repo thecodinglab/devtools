@@ -41,7 +41,7 @@ var blockFailures = map[string]blockFailure{
 	// an old build without the bridge command.
 	"incompatible": {Exit: 1, Stderr: "unknown command \"bridge\" for \"devtools\"\n"},
 	// more than 64 KiB before the marker (3.5.2).
-	"protocol": {Exit: 0, Noise: 65<<10 + 1, Stdout: "devtools-bridge-ready 2\n"},
+	"protocol": {Exit: 0, Noise: 65<<10 + 1, Stdout: "devtools-bridge-ready 1\n"},
 }
 
 // sshArgOptions are the options of ssh that take an argument

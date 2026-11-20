@@ -21,7 +21,10 @@ import (
 //     the shown view (SEC15);
 //   - Request sends a command of the client to the shown server and hands
 //     back its one reply. A request whose link is lost is answered locally
-//     with err{code:"lost"} and never sent again (3.5.2).
+//     with err{code:"lost"} and never sent again (3.5.2). One of a family
+//     the server's welcome does not list is answered locally with
+//     err{code:"unsupported"}: an older server is used for what it can do,
+//     not refused.
 
 // request is a request of the client in flight on a link.
 type request struct {
@@ -115,6 +118,12 @@ var notForRequest = map[string]bool{
 	proto.TypeCatalogWatch: true, proto.TypeCatalogStop: true, proto.TypePing: true, proto.TypePong: true,
 }
 
+// needs are the requests of the client that belong to a wire family, with
+// the words of what a server without it cannot do.
+var needs = map[string]struct{ family, what string }{
+	proto.TypePaneResize: {proto.CapTree, "resizing panes"},
+}
+
 // request is Request(m): m goes to the shown server under an id of its
 // link; the reply comes back under m's id.
 func (s *switcher) request(m proto.Msg, reply chan proto.Msg) {
@@ -125,6 +134,10 @@ func (s *switcher) request(m proto.Msg, reply chan proto.Msg) {
 	c := s.cur
 	if c == nil || c.stale || !c.mc.online() {
 		reply <- proto.ErrReply(m.ID, proto.CodeLost, "no machine is shown")
+		return
+	}
+	if n, ok := needs[m.T]; ok && !hasCap(c.mc, n.family) {
+		reply <- proto.ErrReply(m.ID, proto.CodeUnsupported, n.what+" needs a newer devtools server")
 		return
 	}
 	id := c.mc.newID()
