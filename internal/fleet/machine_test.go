@@ -280,6 +280,7 @@ func TestAnIncompatibleMachineIsShownAndNotRetriedInALoop(t *testing.T) {
 // NT6
 func TestAConnectMachineIsRedialledWithBackoff(t *testing.T) {
 	r := start(t, "M connect")
+	r.F.Focus(false)
 	feed := r.OpenHub()
 	feed.Next("M", hub.Connecting)
 	waits := []time.Duration{
@@ -302,6 +303,67 @@ func TestAConnectMachineIsRedialledWithBackoff(t *testing.T) {
 	if s.Counts["working"] != 1 {
 		t.Fatalf("counts %v after the return, want its working agent", s.Counts)
 	}
+}
+
+func TestWithFocusTheBackoffStopsAtTwoSeconds(t *testing.T) {
+	r := start(t, "M connect")
+	feed := r.OpenHub()
+	feed.Next("M", hub.Connecting)
+	waits := []time.Duration{
+		500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second, 2 * time.Second, 2 * time.Second,
+	}
+	for i, d := range waits {
+		r.M("M").Fail(remote.Unreachable)
+		feed.Next("M", hub.Failed)
+		r.Clock.WaitTimer(t, d)
+		r.Advance(d - time.Millisecond)
+		waitDials(t, r, "M", i+1)
+		r.Advance(time.Millisecond)
+		waitDials(t, r, "M", i+2)
+		feed.Next("M", hub.Connecting)
+	}
+}
+
+func TestGainingFocusBringsALongRetryForward(t *testing.T) {
+	r := start(t, "M connect")
+	r.F.Focus(false)
+	feed := r.OpenHub()
+	feed.Next("M", hub.Connecting)
+	dials := 1
+	for _, d := range []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second, 4 * time.Second} {
+		r.M("M").Fail(remote.Unreachable)
+		feed.Next("M", hub.Failed)
+		r.Clock.WaitTimer(t, d)
+		r.Advance(d)
+		dials++
+		waitDials(t, r, "M", dials)
+		feed.Next("M", hub.Connecting)
+	}
+	// unfocused the next wait is 8 s; focus a second in, and it dials a
+	// second later, 2 s after the failure
+	r.M("M").Fail(remote.Unreachable)
+	feed.Next("M", hub.Failed)
+	r.Clock.WaitTimer(t, 8*time.Second)
+	r.Advance(time.Second)
+	r.F.Focus(true)
+	r.Clock.WaitTimer(t, time.Second)
+	waitDials(t, r, "M", dials)
+	r.Advance(time.Second)
+	dials++
+	waitDials(t, r, "M", dials)
+	feed.Next("M", hub.Connecting)
+	// a retry overdue by then dials at once
+	r.F.Focus(false)
+	r.M("M").Fail(remote.Unreachable)
+	feed.Next("M", hub.Failed)
+	r.Clock.WaitTimer(t, 16*time.Second)
+	r.Advance(5 * time.Second)
+	waitDials(t, r, "M", dials)
+	r.F.Focus(true)
+	r.Clock.WaitTimer(t, 0)
+	r.Advance(0)
+	dials++
+	waitDials(t, r, "M", dials)
 }
 
 func TestTheBackoffStartsAgainAfterAMinuteOnline(t *testing.T) {

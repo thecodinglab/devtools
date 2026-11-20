@@ -18,6 +18,7 @@ const (
 	backoffMin   = 500 * time.Millisecond
 	backoffMax   = 120 * time.Second
 	backoffReset = 60 * time.Second // online this long: the next failure starts the backoff again
+	focusedRetry = 2 * time.Second  // while the terminal has focus, a transient failure is retried at least this often
 	attentionGap = 30 * time.Second // a reason that needs the user is retried this often
 	idleClose    = 10 * time.Minute // an on-demand machine nobody uses is closed (3.5.1)
 )
@@ -47,6 +48,8 @@ type machine struct {
 	idle     *timer
 	backoff  time.Duration
 	lastTry  time.Time
+	failedAt time.Time // the transient failure the scheduled retry is for
+	retryAt  time.Time // when it dials
 	onlineAt time.Time
 	nextID   uint64
 
@@ -374,6 +377,10 @@ func (f *Fleet) failed(mc *machine, fail *remote.Failure) {
 		mc.status, p.Retry = "retrying", "retrying"
 		d := mc.backoff
 		mc.backoff = min(mc.backoff*2, backoffMax)
+		if f.focused {
+			d = min(d, focusedRetry)
+		}
+		mc.failedAt = f.clock.Now()
 		f.scheduleRetry(mc, d)
 	default:
 		mc.status, p.Retry = "attention", "in-30s"
@@ -388,6 +395,7 @@ func (f *Fleet) failed(mc *machine, fail *remote.Failure) {
 // scheduleRetry dials mc again after d, if it is still supervised then.
 func (f *Fleet) scheduleRetry(mc *machine, d time.Duration) {
 	mc.retry.stop()
+	mc.retryAt = f.clock.Now().Add(d)
 	mc.retry = f.after(d, func() {
 		mc.retry = nil
 		if mc.dropped || mc.link != nil || mc.dialing {
@@ -403,6 +411,22 @@ func (f *Fleet) scheduleRetry(mc *machine, d time.Duration) {
 		}
 		f.dial(mc)
 	})
+}
+
+// hurryRetries brings the retries of transient failures forward when the
+// terminal gains focus: none dials later than focusedRetry after its
+// failure, and one that is overdue by that dials now.
+func (f *Fleet) hurryRetries() {
+	now := f.clock.Now()
+	for _, mc := range f.list() {
+		if mc.status != "retrying" || !mc.retry.active() {
+			continue
+		}
+		due := mc.failedAt.Add(focusedRetry)
+		if due.Before(mc.retryAt) {
+			f.scheduleRetry(mc, max(due.Sub(now), 0))
+		}
+	}
 }
 
 // disconnect closes mc's link and stops whatever runs for it.

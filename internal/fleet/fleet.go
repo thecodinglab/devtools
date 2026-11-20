@@ -305,6 +305,7 @@ func (f *Fleet) Resize(cols, rows int) {
 
 // Focus records whether the outer terminal has focus and forwards the
 // change to the link of what is displayed (3.6.3: "seen" on that server).
+// While it has focus, a lost link is retried at least every focusedRetry.
 func (f *Fleet) Focus(focused bool) {
 	f.post(func() {
 		if f.focused == focused {
@@ -317,6 +318,9 @@ func (f *Fleet) Focus(focused bool) {
 			}
 		}
 		f.view.focusChanged()
+		if focused {
+			f.hurryRetries()
+		}
 		f.dirty = true
 	})
 }
