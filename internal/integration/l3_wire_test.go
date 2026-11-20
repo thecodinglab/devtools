@@ -184,10 +184,34 @@ func TestSplitAndCloseResizeThePrograms(t *testing.T) {
 		t.Fatalf("the frame of the first pane is %dx%d", s.Cols, s.Rows)
 	}
 
-	// A third pane does not fit in a tab.
-	if r := c.Request(proto.PaneSplit{Pane: sp.Pane, Direction: proto.SplitDown}); r.OK || r.Code != proto.CodeLimit {
-		t.Fatalf("a second split was answered %+v", r)
+	// A third pane nests: the second is split down, 12 and 11 rows around
+	// the divider row.
+	r = c.Request(proto.PaneSplit{Pane: sp.Pane, Direction: proto.SplitDown})
+	if !r.OK {
+		t.Fatalf("a second split: %s: %s", r.Code, r.Text)
 	}
+	var third proto.PaneSplitResult
+	r.Msg.Decode(&third)
+	waitSize(c, sp.Pane, 40, 12)
+	waitSize(c, third.Pane, 40, 11)
+	waitSize(c, first, 40, 24)
+
+	// A resize moves the border between the first pane and the other two.
+	r = c.Request(proto.PaneResize{Pane: first, Direction: "right", Cells: 5})
+	var rs proto.PaneResizeResult
+	r.Msg.Decode(&rs)
+	if !r.OK || !rs.Moved {
+		t.Fatalf("pane.resize was answered %+v", r)
+	}
+	waitSize(c, first, 45, 24)
+	waitSize(c, sp.Pane, 35, 12)
+	waitSize(c, third.Pane, 35, 11)
+
+	// Closing the third gives the second its rows back.
+	if r := c.Request(proto.PaneClose{Pane: third.Pane}); !r.OK {
+		t.Fatalf("pane.close: %s: %s", r.Code, r.Text)
+	}
+	waitSize(c, sp.Pane, 35, 24)
 
 	if r := c.Request(proto.PaneClose{Pane: sp.Pane}); !r.OK {
 		t.Fatalf("pane.close: %s: %s", r.Code, r.Text)

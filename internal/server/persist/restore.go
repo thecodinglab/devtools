@@ -61,10 +61,12 @@ func isDir(path string) bool {
 //     seen before in the file, is dropped;
 //   - a session without a directory, or with the directory of an earlier
 //     session, is dropped;
-//   - a tab keeps at most its first two panes; a tab without panes, and a
-//     session without tabs, is dropped;
-//   - split is "" with one pane and "right" or "down" with two ("right"
-//     when it was anything else); focused is one of the tab's panes (else
+//   - a tab keeps at most its first proto.MaxPanes panes; a tab without
+//     panes, and a session without tabs, is dropped;
+//   - the layout is the tab's when it is well formed and its leaves are
+//     the panes kept, in order; else the panes lie in one split of
+//     direction split ("right" when it was anything else); split is the
+//     direction of the layout's root, "" with one pane; focused is one of the tab's panes (else
 //     the first); current is one of the session's tabs (else the first);
 //   - the size is clamped to the limits of 4.1, a size of zero is the
 //     default 120 by 40; the label is sanitised; a pane without a directory
@@ -110,7 +112,7 @@ func Repair(s State) State {
 			}
 			var panes []Pane
 			for _, p := range t.Panes {
-				if len(panes) == 2 {
+				if len(panes) == proto.MaxPanes {
 					break
 				}
 				if !validID(p.ID, 'p') || seen[p.ID] {
@@ -127,12 +129,16 @@ func Repair(s State) State {
 			}
 			seen[t.ID] = true
 			t.Panes = panes
-			switch {
-			case len(panes) == 1:
-				t.Split = proto.SplitNone
-			case t.Split != proto.SplitRight && t.Split != proto.SplitDown:
-				t.Split = proto.SplitRight
+			pt := proto.Tab{Split: t.Split}
+			for _, p := range panes {
+				pt.Panes = append(pt.Panes, p.ID)
 			}
+			if t.Layout != nil {
+				pt.Layout = *t.Layout
+			}
+			tree := pt.Tree().Clone()
+			t.Layout = &tree
+			t.Split = tree.Split
 			if !hasPane(panes, t.Focused) {
 				t.Focused = panes[0].ID
 			}

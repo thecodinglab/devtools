@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,11 +58,11 @@ func checkInvariants(s *State) error {
 		if listedTabs[id] == "" {
 			return fmt.Errorf("tab %s is listed by no session", id)
 		}
-		switch {
-		case len(t.Panes) == 1 && t.Split == "":
-		case len(t.Panes) == 2 && (t.Split == "right" || t.Split == "down"):
-		default:
-			return fmt.Errorf("tab %s: %d panes, split %q", id, len(t.Panes), t.Split)
+		if !slices.Equal(t.Layout.Leaves(), t.Panes) || t.Split != t.Layout.Split || !reflect.DeepEqual(t.Tree(), t.Layout) {
+			return fmt.Errorf("tab %s: panes %v, split %q, layout %+v", id, t.Panes, t.Split, t.Layout)
+		}
+		if len(t.Panes) > proto.MaxPanes {
+			return fmt.Errorf("tab %s: %d panes", id, len(t.Panes))
 		}
 		focused := false
 		for _, pid := range t.Panes {
@@ -261,7 +262,7 @@ func TestRandomOperationsKeepInvariantsAndDeltasEqualSnapshots(t *testing.T) {
 		var r Result
 		var err *Error
 		var name string
-		switch op := rng.IntN(16); op {
+		switch op := rng.IntN(17); op {
 		case 0:
 			name = "open"
 			_, _, r = s.OpenSession(dir(), fmt.Sprintf("label-%d", i))
@@ -297,6 +298,9 @@ func TestRandomOperationsKeepInvariantsAndDeltasEqualSnapshots(t *testing.T) {
 		case 8:
 			name = "focus-dir"
 			_, _, r, err = s.FocusDir(pick(keys("p")), []string{"left", "right", "up", "down", "x"}[rng.IntN(5)])
+		case 16:
+			name = "resize"
+			_, r, err = s.Resize(pick(keys("p")), []string{"left", "right", "up", "down", "x"}[rng.IntN(5)], rng.IntN(12)-1)
 		case 9:
 			name = "close-pane"
 			if rng.IntN(2) == 0 {

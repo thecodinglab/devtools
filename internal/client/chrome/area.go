@@ -28,13 +28,13 @@ import (
 // (5a.6.8). Below it the client calls TooSmall instead of everything else.
 func (l *look) MinSize() (cols, rows int) { return ui.MinCols, ui.MinRows }
 
-// Divider fills c, the one-cell line between two panes, with │ (panes side
-// by side, vertical) or ─ (stacked) in comment, and puts the pointer into
-// its middle cell: ◂ or ▸ towards the pane with the keys side by side, ▴ or
+// Divider fills c, a one-cell line between panes, with │ (panes side by
+// side, vertical) or ─ (stacked) in comment, and puts the pointer at p.At
+// when p points: ◂ or ▸ towards the pane with the keys side by side, ▴ or
 // ▾ stacked. The pointer is strong ink; while the window has lost the
 // terminal's focus or the view is stale no pane has the keys and it is
 // comment, like the line (5a.6.5).
-func (l *look) Divider(c *screen.Canvas, s State, vertical bool, firstFocused bool) {
+func (l *look) Divider(c *screen.Canvas, s State, vertical bool, p Pointer) {
 	w, h := c.Size()
 	if w <= 0 || h <= 0 {
 		return
@@ -47,17 +47,21 @@ func (l *look) Divider(c *screen.Canvas, s State, vertical bool, firstFocused bo
 	}
 	c.Fill(screen.Rect{W: w, H: h}, screen.Cell{S: t.Glyph(g), W: 1, Style: line})
 
+	if p.Toward == PointNone {
+		return
+	}
 	pointer := line
 	if s.WindowFocused && s.View != "stale" {
 		pointer = areaStyle(t.Face(ui.RoleStrong, ui.GroundNone))
 	}
-	x, y := w/2, 0
+	before := p.Toward == PointBefore
+	x, y := min(max(p.At, 0), w-1), 0
 	switch {
-	case vertical && firstFocused:
-		x, y, g = 0, h/2, ui.GlyphLeft
+	case vertical && before:
+		x, y, g = 0, min(max(p.At, 0), h-1), ui.GlyphLeft
 	case vertical:
-		x, y, g = 0, h/2, ui.GlyphRight
-	case firstFocused:
+		x, y, g = 0, min(max(p.At, 0), h-1), ui.GlyphRight
+	case before:
 		g = ui.GlyphUp
 	default:
 		g = ui.GlyphDown

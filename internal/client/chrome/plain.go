@@ -310,28 +310,30 @@ func joinNonEmpty(words ...string) string {
 }
 
 // Divider fills c with "|" (panes side by side) or "-" (stacked) and puts
-// a pointer at the pane with the keys into the middle cell: "<" or ">",
+// the pointer at the pane with the keys at p.At when p points: "<" or ">",
 // "^" or "v". While the window has lost the focus or the view is stale no
 // pane has the keys and there is no pointer.
-func (Plain) Divider(c *screen.Canvas, s State, vertical bool, firstFocused bool) {
+func (Plain) Divider(c *screen.Canvas, s State, vertical bool, p Pointer) {
 	w, h := c.Size()
 	line := plainH
 	if vertical {
 		line = plainV
 	}
 	c.Fill(screen.Rect{X: 0, Y: 0, W: w, H: h}, screen.Cell{S: line, W: 1})
-	if !s.WindowFocused || s.View == "stale" {
+	if !s.WindowFocused || s.View == "stale" || p.Toward == PointNone || w <= 0 || h <= 0 {
 		return
 	}
+	before := p.Toward == PointBefore
+	x, y := min(max(p.At, 0), w-1), min(max(p.At, 0), h-1)
 	switch {
-	case vertical && firstFocused:
-		c.Set(0, h/2, screen.Cell{S: "<", W: 1, Style: plainBold})
+	case vertical && before:
+		c.Set(0, y, screen.Cell{S: "<", W: 1, Style: plainBold})
 	case vertical:
-		c.Set(0, h/2, screen.Cell{S: ">", W: 1, Style: plainBold})
-	case firstFocused:
-		c.Set(w/2, 0, screen.Cell{S: "^", W: 1, Style: plainBold})
+		c.Set(0, y, screen.Cell{S: ">", W: 1, Style: plainBold})
+	case before:
+		c.Set(x, 0, screen.Cell{S: "^", W: 1, Style: plainBold})
 	default:
-		c.Set(w/2, 0, screen.Cell{S: "v", W: 1, Style: plainBold})
+		c.Set(x, 0, screen.Cell{S: "v", W: 1, Style: plainBold})
 	}
 }
 

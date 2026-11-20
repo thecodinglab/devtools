@@ -207,6 +207,14 @@ func TestIdsAreNeverReused(t *testing.T) {
 	}
 }
 
+// twoOf is the tree of panes a and b in split ("" is a alone).
+func twoOf(split string) proto.Node {
+	if split == "" {
+		return proto.Node{Pane: "a"}
+	}
+	return proto.Row([]string{"a", "b"}, split)
+}
+
 func TestLayoutGivesTheFirstPaneTheExtraCell(t *testing.T) {
 	cases := []struct {
 		cols, rows int
@@ -221,51 +229,113 @@ func TestLayoutGivesTheFirstPaneTheExtraCell(t *testing.T) {
 		{200, 49, "right", []Rect{{0, 0, 100, 49}, {101, 0, 99, 49}}},
 	}
 	for _, c := range cases {
-		if got := Layout(c.cols, c.rows, c.split); !reflect.DeepEqual(got, c.want) {
+		if got := Layout(c.cols, c.rows, twoOf(c.split)); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("Layout(%d, %d, %q) = %v, want %v", c.cols, c.rows, c.split, got, c.want)
 		}
 	}
 }
 
+func TestLayoutSharesByWeightAndNests(t *testing.T) {
+	tree := proto.Node{Split: "right", Nodes: []proto.Node{
+		{Pane: "a", Weight: 3},
+		{Split: "down", Weight: 1, Nodes: []proto.Node{{Pane: "b"}, {Pane: "c"}, {Pane: "d"}}},
+	}}
+	// 81 columns: 80 to share 3:1 after the divider; 24 rows: 22 to share
+	// in three after two dividers, the first two get the extra cell.
+	want := []Rect{{0, 0, 60, 24}, {61, 0, 20, 8}, {61, 9, 20, 7}, {61, 17, 20, 7}}
+	if got := Layout(81, 24, tree); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Layout = %v, want %v", got, want)
+	}
+}
+
 func TestLayoutNeverGoesBelowTheMinimum(t *testing.T) {
+	grid := proto.Node{Split: "right", Nodes: []proto.Node{
+		{Pane: "a", Weight: 50},
+		{Split: "down", Nodes: []proto.Node{{Pane: "b"}, {Pane: "c", Weight: 9}}},
+		{Pane: "d"},
+	}}
 	for cols := 0; cols <= 30; cols++ {
 		for rows := 0; rows <= 12; rows++ {
-			for _, split := range []string{"", "right", "down"} {
-				rs := Layout(cols, rows, split)
-				want := 1
-				if split != "" {
-					want = 2
-				}
-				if len(rs) != want {
-					t.Fatalf("Layout(%d, %d, %q) has %d rectangles", cols, rows, split, len(rs))
+			for _, tree := range []proto.Node{twoOf(""), twoOf("right"), twoOf("down"), grid} {
+				rs := Layout(cols, rows, tree)
+				if len(rs) != len(tree.Leaves()) {
+					t.Fatalf("Layout(%d, %d, %+v) has %d rectangles", cols, rows, tree, len(rs))
 				}
 				for _, r := range rs {
 					if r.W < MinPaneCols || r.H < MinPaneRows {
-						t.Fatalf("Layout(%d, %d, %q) = %v: below %d by %d", cols, rows, split, rs, MinPaneCols, MinPaneRows)
+						t.Fatalf("Layout(%d, %d, %+v) = %v: below %d by %d", cols, rows, tree, rs, MinPaneCols, MinPaneRows)
 					}
 				}
 			}
 		}
 	}
+	// Room enough: the weight of a gives way so that no pane is below the
+	// minimum, and the panes do not overlap.
+	rs := Layout(16, 6, grid)
+	if rs[2].W < MinPaneCols || rs[3].W < MinPaneCols || rs[1].H < MinPaneRows {
+		t.Fatalf("Layout(16, 6) = %v", rs)
+	}
+	if rs[0].X+rs[0].W >= rs[1].X || rs[1].X+rs[1].W >= rs[3].X {
+		t.Fatalf("Layout(16, 6) = %v: panes overlap", rs)
+	}
 }
 
-func TestSplitRefusesAThirdPane(t *testing.T) {
+// rectsOf is the layout of a tab at its session's size, by pane.
+func (s *State) rectsOf(t *testing.T, tid string) map[string]Rect {
+	t.Helper()
+	tb := s.tabs[tid]
+	x := s.sessions[tb.Session]
+	out := map[string]Rect{}
+	for i, r := range Layout(x.cols, x.rows, tb.Layout) {
+		out[tb.Panes[i]] = r
+	}
+	return out
+}
+
+func TestSplitNestsWithoutAPaneLimit(t *testing.T) {
 	s := newModel()
 	sid := open(t, s, "/d")
-	first := s.tabs[s.sessions[sid].Current].Panes[0]
-	second := splitPane(t, s, first, "right", "")
-	before := s.Snapshot()
-	for _, p := range []string{first, second} {
-		for _, dir := range []string{"right", "down"} {
-			_, r, err := s.Split(p, dir, "")
-			wantCode(t, err, proto.CodeLimit)
-			if len(r.Changes)+len(r.Effects) != 0 {
-				t.Fatalf("a refused split returned %+v", r)
-			}
-		}
+	tid := s.sessions[sid].Current
+	// 120 x 40: p1 | p2, then p2 split right again joins the split, then
+	// p3 is split down.
+	p2 := splitPane(t, s, "p1", "right", "")
+	p3 := splitPane(t, s, p2, "right", "")
+	p4 := splitPane(t, s, p3, "down", "")
+	tb := s.tab(t, tid)
+	if !reflect.DeepEqual(tb.Panes, []string{"p1", p2, p3, p4}) || tb.Split != "right" || tb.Focused != p4 {
+		t.Fatalf("tab = %+v", tb)
 	}
-	if !reflect.DeepEqual(before, s.Snapshot()) {
-		t.Fatal("a refused split changed the state")
+	want := proto.Node{Split: "right", Nodes: []proto.Node{
+		{Pane: "p1", Weight: 2},
+		{Pane: p2, Weight: 1},
+		{Split: "down", Weight: 1, Nodes: []proto.Node{{Pane: p3, Weight: 1}, {Pane: p4, Weight: 1}}},
+	}}
+	if !reflect.DeepEqual(tb.Layout, want) {
+		t.Fatalf("layout = %+v, want %+v", tb.Layout, want)
+	}
+	got := s.rectsOf(t, tid)
+	wantRects := map[string]Rect{
+		"p1": {0, 0, 60, 40}, p2: {61, 0, 29, 40},
+		p3: {91, 0, 29, 20}, p4: {91, 21, 29, 19},
+	}
+	if !reflect.DeepEqual(got, wantRects) {
+		t.Fatalf("rects = %v, want %v", got, wantRects)
+	}
+	// Splitting goes on as long as the panes keep their minimum.
+	n := 4
+	for {
+		_, _, err := s.Split(s.tabs[tid].Focused, "down", "")
+		if err != nil {
+			wantCode(t, err, proto.CodeLimit)
+			break
+		}
+		n++
+	}
+	if n < 6 {
+		t.Fatalf("only %d panes before the limit", n)
+	}
+	if err := checkInvariants(s); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -287,17 +357,33 @@ func TestSplitRefusesWhenThePaneWouldBeTooSmall(t *testing.T) {
 		sid := open(t, s, "/d")
 		s.SetSize(sid, c.cols, c.rows)
 		p := s.tabs[s.sessions[sid].Current].Panes[0]
-		_, _, err := s.Split(p, c.dir, "")
+		before := s.Snapshot()
+		_, r, err := s.Split(p, c.dir, "")
 		if c.fits && err != nil {
 			t.Errorf("%dx%d %s: %v, want a split", c.cols, c.rows, c.dir, err)
 		}
-		if !c.fits && (err == nil || err.Code != proto.CodeLimit) {
-			t.Errorf("%dx%d %s: %v, want limit", c.cols, c.rows, c.dir, err)
+		if !c.fits {
+			if err == nil || err.Code != proto.CodeLimit {
+				t.Errorf("%dx%d %s: %v, want limit", c.cols, c.rows, c.dir, err)
+			}
+			if len(r.Changes)+len(r.Effects) != 0 || !reflect.DeepEqual(before, s.Snapshot()) {
+				t.Errorf("%dx%d %s: a refused split changed the state", c.cols, c.rows, c.dir)
+			}
 		}
 	}
+	// A pane too narrow to split in a tab that is wide enough.
 	s := newModel()
+	sid := open(t, s, "/d")
+	s.SetSize(sid, 20, 10)
+	p2 := splitPane(t, s, "p1", "right", "") // 10 | 9
+	_, _, err := s.Split(p2, "right", "")    // 9 = 4 + 1 + 4
+	ok(t, err)
+	_, _, err = s.Split(p2, "right", "") // 4
+	wantCode(t, err, proto.CodeLimit)
+
+	s = newModel()
 	open(t, s, "/d")
-	_, _, err := s.Split("p1", "left", "")
+	_, _, err = s.Split("p1", "left", "")
 	wantCode(t, err, proto.CodeInvalid)
 	_, _, err = s.Split("p9", "right", "")
 	wantCode(t, err, proto.CodeNoPane)
@@ -764,5 +850,149 @@ func TestAgentsFollowTheirPane(t *testing.T) {
 	}
 	if r := s.DelAgent("p1"); len(r.Changes) != 0 {
 		t.Fatalf("deleting twice: %s", changes(r.Changes))
+	}
+}
+
+// grid opens a session at 121 x 41 with p1 left, and p2 above p3 right of
+// it: p1 | (p2 / p3).
+func grid(t *testing.T) (*State, string, string) {
+	t.Helper()
+	s := newModel()
+	sid := open(t, s, "/d")
+	s.SetSize(sid, 121, 41)
+	s.Display(sid)
+	p2 := splitPane(t, s, "p1", "right", "")
+	splitPane(t, s, p2, "down", "")
+	return s, sid, s.sessions[sid].Current
+}
+
+func TestResizeMovesTheClosestBorder(t *testing.T) {
+	s, _, tid := grid(t)
+	// p1 | p2, p3 at 121 x 41: p1 60 wide, p2 and p3 60 wide, 20 high each.
+	if got := s.rectsOf(t, tid); got["p1"] != (Rect{0, 0, 60, 41}) || got["p2"] != (Rect{61, 0, 60, 20}) || got["p3"] != (Rect{61, 21, 60, 20}) {
+		t.Fatalf("rects = %v", got)
+	}
+	steps := []struct {
+		pane, dir string
+		cells     int
+		moved     bool
+		p1W, p2H  int
+	}{
+		{"p1", "right", 5, true, 65, 20},    // p1's own border: it grows
+		{"p1", "left", 10, true, 55, 20},    // no border left of p1: its right one moves left
+		{"p2", "left", 3, true, 52, 20},     // p2 grows into p1
+		{"p3", "up", 4, true, 52, 16},       // p3 grows into p2
+		{"p2", "up", 2, true, 52, 14},       // no border above p2: the one below it moves up
+		{"p1", "up", 1, false, 52, 14},      // no border across p1
+		{"p2", "up", 100, true, 52, 2},      // only to p2's minimum
+		{"p2", "up", 1, false, 52, 2},       // at the minimum
+		{"p1", "left", 1000, true, 4, 2},    // only to p1's minimum
+		{"p3", "right", 1000, true, 116, 2}, // to the minimum of p2 and p3 together
+	}
+	for _, st := range steps {
+		before := s.tab(t, tid)
+		moved, r, err := s.Resize(st.pane, st.dir, st.cells)
+		ok(t, err)
+		got := s.rectsOf(t, tid)
+		if moved != st.moved || got["p1"].W != st.p1W || got["p2"].H != st.p2H {
+			t.Fatalf("resize %s %s %d = %v: rects %v; want moved %v, p1 %d wide, p2 %d high", st.pane, st.dir, st.cells, moved, got, st.moved, st.p1W, st.p2H)
+		}
+		if !moved && (len(r.Changes)+len(r.Effects) != 0 || !reflect.DeepEqual(before, s.tab(t, tid))) {
+			t.Fatalf("resize %s %s that did not move changed %s", st.pane, st.dir, changes(r.Changes))
+		}
+		if err := checkInvariants(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The running panes follow their rectangles.
+	_, r, err := s.Resize("p1", "left", 10)
+	ok(t, err)
+	wantEffects(t, r, "resize p1 106x41; resize p2 14x2; resize p3 14x38")
+
+	_, _, err = s.Resize("p1", "north", 1)
+	wantCode(t, err, proto.CodeInvalid)
+	_, _, err = s.Resize("p1", "left", 0)
+	wantCode(t, err, proto.CodeInvalid)
+	_, _, err = s.Resize("p99", "left", 1)
+	wantCode(t, err, proto.CodeNoPane)
+}
+
+func TestResizeKeepsProportionsWhenTheWindowChanges(t *testing.T) {
+	s, sid, tid := grid(t)
+	s.Resize("p1", "right", 20) // p1 80 of 120 cells
+	s.SetSize(sid, 61, 41)
+	if got := s.rectsOf(t, tid)["p1"].W; got != 40 {
+		t.Fatalf("p1 is %d wide at 61 columns, want 40 (two thirds)", got)
+	}
+}
+
+func TestFocusMovesToTheNeighbourInTheGrid(t *testing.T) {
+	s, _, tid := grid(t)
+	cases := []struct {
+		from, dir, target string
+		moved             bool
+	}{
+		{"p1", "right", "p2", true}, // p2 and p3 share as many rows with p1: the top one
+		{"p2", "left", "p1", true},
+		{"p3", "left", "p1", true},
+		{"p2", "down", "p3", true},
+		{"p3", "up", "p2", true},
+		{"p3", "right", "p3", false},
+		{"p1", "up", "p1", false},
+	}
+	for _, c := range cases {
+		s.Focus(c.from)
+		target, moved, _, err := s.FocusDir(c.from, c.dir)
+		ok(t, err)
+		if target != c.target || moved != c.moved || s.tabs[tid].Focused != c.target {
+			t.Fatalf("from %s %s = %s, %v; want %s, %v", c.from, c.dir, target, moved, c.target, c.moved)
+		}
+	}
+	// p3 grown upward shares more rows with p1 than p2 does.
+	s.Resize("p3", "up", 10)
+	if target, _, _, _ := s.FocusDir("p1", "right"); target != "p3" {
+		t.Fatalf("from p1 right = %s, want p3, the larger neighbour", target)
+	}
+}
+
+func TestClosingANestedPaneGivesItsSpaceToItsNeighbour(t *testing.T) {
+	s, _, tid := grid(t)
+	// Closing p3 leaves p1 | p2: the split of p2 and p3 goes.
+	r, err := s.ClosePane("p3")
+	ok(t, err)
+	tb := s.tab(t, tid)
+	want := proto.Node{Split: "right", Nodes: []proto.Node{{Pane: "p1", Weight: 1}, {Pane: "p2", Weight: 1}}}
+	if !reflect.DeepEqual(tb.Layout, want) || tb.Focused != "p2" || !reflect.DeepEqual(tb.Panes, []string{"p1", "p2"}) {
+		t.Fatalf("tab = %+v", tb)
+	}
+	wantEffects(t, r, "resize p2 60x41; kill p3")
+
+	// p1 | p2 | p4 with p1 focused: closing p2 gives its space to p1, and
+	// the focus stays.
+	p4 := splitPane(t, s, "p2", "right", "")
+	s.Focus("p1")
+	_, err = s.ClosePane("p2")
+	ok(t, err)
+	tb = s.tab(t, tid)
+	if tb.Focused != "p1" || s.rectsOf(t, tid)["p1"].W != 90 {
+		t.Fatalf("tab = %+v, rects %v", tb, s.rectsOf(t, tid))
+	}
+
+	// A split that keeps one node joins the split above it when they have
+	// the same direction: p1 | (p5 / (p4 | p6)), closing p5.
+	p5 := splitPane(t, s, p4, "down", "")
+	p6 := splitPane(t, s, p4, "right", "")
+	_, err = s.ClosePane(p5)
+	ok(t, err)
+	tb = s.tab(t, tid)
+	if tb.Layout.Split != "right" || len(tb.Layout.Nodes) != 3 || !reflect.DeepEqual(tb.Panes, []string{"p1", p4, p6}) {
+		t.Fatalf("layout = %+v", tb.Layout)
+	}
+	rs := s.rectsOf(t, tid)
+	if rs["p1"].W != 90 || rs[p4].W+rs[p6].W+1 != 30 {
+		t.Fatalf("rects = %v", rs)
+	}
+	if err := checkInvariants(s); err != nil {
+		t.Fatal(err)
 	}
 }

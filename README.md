@@ -314,6 +314,14 @@ devtools agents --json
 
 Prints every key binding of the devtools window, of the switcher and of copy mode after the `bind` and `unbind` lines of the config were applied. The prefix key is `ctrl+space`; `prefix ?` shows the bindings in the window.
 
+A tab holds as many panes as fit, at least 4 columns by 2 rows each. `prefix %` or `prefix v` splits the focused pane right, `prefix "` or `prefix -` below it; splits nest, so a pane split down beside another split right makes a grid. `ctrl+h` `ctrl+j` `ctrl+k` `ctrl+l` move the focus to the neighbouring pane (vim, neovim and fzf get them instead), and `prefix x` closes a pane, giving its space to its neighbour.
+
+`prefix H` `J` `K` `L` move a border of the focused pane by 5 cells left, down, up or right, and `prefix ctrl+←` `↓` `↑` `→` by one: the border on that side when there is a pane there, which grows the pane, else the one on the other side. For a second after a resize the same keys resize again without the prefix. The actions are `resize-left`, `resize-down`, `resize-up` and `resize-right`, with an optional number of cells from 1 to 99:
+
+```text
+bind alt+H resize-left 2
+```
+
 ### `session list`, `pane list`, `pane focus`
 
 `devtools session list --json` and `devtools pane list --json` print one object per line for each session or pane of the devtools server. `devtools pane focus --direction left|right|up|down` moves the focus to the neighbouring pane of the pane it runs in: exit 0 moved, 1 no pane that way, 2 an error; editors use it for navigation across panes.

@@ -39,4 +39,5 @@ type Result struct {
 	Pending bool // the prefix is waiting for a key
 	Unbound bool // the key after the prefix has no binding: Verdict is Swallow, the prefix has ended, and the client shows the notice "No binding for {key}"
 	More    bool // "?" after the prefix (built in, like esc): Verdict is Swallow, Pending stays true, and the client sets State.Hints and raises State.HintPage
+	Repeat  bool // Action is a resize that may repeat: the client calls EndRepeat RepeatTime after the last such result
 }

@@ -2,7 +2,7 @@ package proto
 
 // Gen is the protocol generation (4.1). A peer with another generation is
 // refused with a text that names both.
-const Gen = 1
+const Gen = 2
 
 // Limits of 4.1, enforced by both sides.
 const (
@@ -12,6 +12,8 @@ const (
 	MaxPaste   = 256 << 10 // input.paste.text per message
 	MaxClip    = 1 << 20   // event.clipboard.data, decoded; never empty
 	MaxText    = 1 << 20   // the text of a pane.text result; longer selections are cut
+
+	MaxPanes = 256 // panes of one tab: below the fleet's bound of panes per machine; in practice the minimum pane size limits them first
 
 	MinCols, MinRows = 2, 2
 	MaxCols, MaxRows = 1000, 500

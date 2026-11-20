@@ -11,7 +11,7 @@ import (
 
 // Requests (4.2.7) and the dispatch of everything the reader posts to the
 // loop. The core answers session.open, session.close, tab.*, pane.split,
-// pane.focus, pane.close and state.get here and the view messages in
+// pane.focus, pane.resize, pane.close and state.get here and the view messages in
 // view.go; input, pane.scroll and pane.text never reach the loop (input.go);
 // a registered extension answers its own types; any other request is
 // answered unsupported and any other notification is ignored (4.1).
@@ -30,6 +30,7 @@ var requests = map[string]request{
 	proto.TypeTabClose:     (*core).tabClose,
 	proto.TypePaneSplit:    (*core).paneSplit,
 	proto.TypePaneFocus:    (*core).paneFocus,
+	proto.TypePaneResize:   (*core).paneResize,
 	proto.TypePaneClose:    (*core).paneClose,
 }
 
@@ -266,4 +267,19 @@ func (c *core) paneClose(cn *conn, m proto.Msg) (any, *model.Error) {
 	}
 	c.apply(r, true)
 	return nil, nil
+}
+
+// paneResize moves a border of the pane; moved is false when no border
+// could move that way (4.2.7).
+func (c *core) paneResize(cn *conn, m proto.Msg) (any, *model.Error) {
+	var q proto.PaneResize
+	if err := decode(m, &q); err != nil {
+		return nil, err
+	}
+	moved, r, err := c.model.Resize(q.Pane, q.Direction, q.Cells)
+	if err != nil {
+		return nil, err
+	}
+	c.apply(r, true)
+	return proto.PaneResizeResult{Moved: moved}, nil
 }

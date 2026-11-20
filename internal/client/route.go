@@ -137,6 +137,10 @@ func (m *Model) input(msg tea.Msg) tea.Cmd {
 
 func (m *Model) routeKey(k tea.Key, release bool, msg tea.Msg) tea.Cmd {
 	ev, wire, ok := keyEvent(k, release)
+	if m.overlay != nil || m.copy != nil || m.confirm != nil || m.pending || m.view != "showing" || m.tooSmall() {
+		// a resize repeats only over the panes it resizes
+		m.keys.EndRepeat()
+	}
 	if ok && !release {
 		m.lastKey = chordName(ev)
 	}
@@ -401,6 +405,10 @@ func chunks(s string, n int) []chunk {
 // further "?", and the notice of an unbound key.
 func (m *Model) prefixResult(r keys.Result) tea.Cmd {
 	var cmds []tea.Cmd
+	if r.Repeat {
+		m.repeatGen++
+		cmds = append(cmds, m.hk.After(keys.RepeatTime, repeatDue{gen: m.repeatGen}))
+	}
 	was := m.prefix
 	m.prefix = r.Pending
 	switch {
@@ -490,6 +498,14 @@ func (m *Model) act(a keys.Action) tea.Cmd {
 		return m.request(proto.PaneClose{Pane: pane})
 	case "focus-left", "focus-right", "focus-up", "focus-down":
 		return m.request(proto.PaneFocus{Pane: pane, Direction: a.Name[len("focus-"):]})
+	case "resize-left", "resize-right", "resize-up", "resize-down":
+		n := 1
+		if a.Arg != "" {
+			if v, err := strconv.Atoi(a.Arg); err == nil && v > 0 {
+				n = v
+			}
+		}
+		return m.request(proto.PaneResize{Pane: pane, Direction: a.Name[len("resize-"):], Cells: n})
 	}
 	return nil
 }

@@ -77,9 +77,9 @@ func cleanTab(t proto.Tab) (proto.Tab, bool) {
 	if !validID('t', t.ID) || !validID('s', t.Session) {
 		return t, false
 	}
-	panes := make([]string, 0, 2)
+	panes := make([]string, 0, min(len(t.Panes), proto.MaxPanes))
 	for _, p := range t.Panes {
-		if validID('p', p) && len(panes) < 2 {
+		if validID('p', p) && len(panes) < proto.MaxPanes {
 			panes = append(panes, p)
 		}
 	}
@@ -91,6 +91,11 @@ func cleanTab(t proto.Tab) (proto.Tab, bool) {
 	case proto.SplitNone, proto.SplitRight, proto.SplitDown:
 	default:
 		t.Split = proto.SplitNone
+	}
+	// a layout that does not fit the panes kept is one split of them
+	t.Layout = t.Tree()
+	if len(t.Panes) > 0 {
+		t.Split = t.Layout.Split
 	}
 	return t, true
 }

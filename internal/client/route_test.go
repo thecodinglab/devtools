@@ -133,6 +133,12 @@ func TestEveryRequestActionSendsItsRequest(t *testing.T) {
 		{[]string{"\""}, proto.PaneSplit{Pane: "p1", Direction: "down"}},
 		{[]string{"-"}, proto.PaneSplit{Pane: "p1", Direction: "down"}},
 		{[]string{"x"}, proto.PaneClose{Pane: "p1"}},
+		{[]string{"L"}, proto.PaneResize{Pane: "p1", Direction: "right", Cells: 5}},
+		{[]string{"H"}, proto.PaneResize{Pane: "p1", Direction: "left", Cells: 5}},
+		{[]string{"J"}, proto.PaneResize{Pane: "p1", Direction: "down", Cells: 5}},
+		{[]string{"K"}, proto.PaneResize{Pane: "p1", Direction: "up", Cells: 5}},
+		{[]string{"ctrl+left"}, proto.PaneResize{Pane: "p1", Direction: "left", Cells: 1}},
+		{[]string{"ctrl+up"}, proto.PaneResize{Pane: "p1", Direction: "up", Cells: 1}},
 	}
 	for _, c := range cases {
 		t.Run(c.want.Type()+" "+c.keys[0], func(t *testing.T) {
@@ -529,4 +535,39 @@ func TestThePrefixWorksWhileTheHubIsOpen(t *testing.T) {
 			t.Errorf("requests %v; ctrl+j moved the pane focus under the hub", rs)
 		}
 	})
+}
+
+// A resize after the prefix repeats without it while the keys come within
+// keys.RepeatTime of each other; after that the key is the pane's again.
+func TestAResizeRepeatsUntilItsTimeEnds(t *testing.T) {
+	d := showOne(t, client.Options{}, proto.Pane{ID: "p1", Program: "zsh"})
+	d.Key("ctrl+space")
+	d.Key("L")
+	d.Key("L")
+	d.Key("ctrl+left")
+	rs := d.F.Requests()
+	if len(rs) != 3 {
+		t.Fatalf("requests %v, want three resizes", rs)
+	}
+	for i, want := range []proto.PaneResize{
+		{Pane: "p1", Direction: "right", Cells: 5},
+		{Pane: "p1", Direction: "right", Cells: 5},
+		{Pane: "p1", Direction: "left", Cells: 1},
+	} {
+		w := proto.Request(rs[i].ID, want)
+		if string(rs[i].Body) != string(w.Body) {
+			t.Fatalf("request %d %s, want %s", i, rs[i].Body, w.Body)
+		}
+	}
+	if in := d.F.Inputs(); len(in) != 0 {
+		t.Fatalf("a resize key reached the pane: %v", in)
+	}
+	d.Advance(keys.RepeatTime)
+	d.Key("L")
+	if in := d.F.Inputs(); len(in) != 1 {
+		t.Fatalf("inputs %v after the repeat time, want L in the pane", in)
+	}
+	if n := len(d.F.Requests()); n != 3 {
+		t.Fatalf("%d requests after the repeat time, want 3", n)
+	}
 }

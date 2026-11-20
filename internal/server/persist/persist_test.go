@@ -60,7 +60,8 @@ func sample(d string) persist.State {
 		Counters: persist.Counters{Session: 4, Tab: 17, Pane: 53},
 		Sessions: []persist.Session{{
 			ID: "s4", Dir: d, Label: "x-main", Current: "t17", Shown: 1795000000000, Cols: 200, Rows: 49,
-			Tabs: []persist.Tab{{ID: "t17", Split: "right", Focused: "p52", Panes: []persist.Pane{{ID: "p52", Cwd: d}, {ID: "p53", Cwd: d}}}},
+			Tabs: []persist.Tab{{ID: "t17", Split: "right", Focused: "p52", Panes: []persist.Pane{{ID: "p52", Cwd: d}, {ID: "p53", Cwd: d}, {ID: "p51", Cwd: d}},
+				Layout: &proto.Node{Split: "right", Nodes: []proto.Node{{Pane: "p52", Weight: 3}, {Split: "down", Weight: 2, Nodes: []proto.Node{{Pane: "p53"}, {Pane: "p51"}}}}}}},
 		}},
 	}
 }
@@ -118,7 +119,7 @@ func TestSaveReplacesTheFileAtomically(t *testing.T) {
 	}
 	var raw map[string]any
 	data, _ := os.ReadFile(path)
-	if err := json.Unmarshal(data, &raw); err != nil || raw["version"] != 1.0 {
+	if err := json.Unmarshal(data, &raw); err != nil || raw["version"] != 2.0 {
 		t.Fatalf("file = %s (%v)", data, err)
 	}
 }
@@ -244,7 +245,7 @@ func TestCorruptFileIsSetAsideNotDeleted(t *testing.T) {
 func TestUnknownVersionIsSetAside(t *testing.T) {
 	state := dir(t, "state")
 	path := filepath.Join(state, persist.FileName)
-	wantSetAside(t, path, `{"version":2,"counters":{"session":1,"tab":1,"pane":1},"sessions":[]}`)
+	wantSetAside(t, path, `{"version":3,"counters":{"session":1,"tab":1,"pane":1},"sessions":[]}`)
 	wantSetAside(t, path, `{"counters":{"session":1,"tab":1,"pane":1},"sessions":[]}`)
 }
 
@@ -357,6 +358,10 @@ func TestRestoreRepairsInvariants(t *testing.T) {
 				{ID: "t5", Split: "down", Focused: "p99", Panes: []persist.Pane{{ID: "p7", Cwd: a}}},                                   // one pane, a split
 				{ID: "t6", Split: "", Focused: "p8", Panes: []persist.Pane{{ID: "p8"}, {ID: "p9", Cwd: a}, {ID: "p10", Cwd: a}}},       // three panes, no split
 				{ID: "t7", Split: "diagonal", Panes: []persist.Pane{{ID: "p11", Cwd: a}, {ID: "p7", Cwd: a}, {ID: "x1"}, {ID: "p12"}}}, // a repeated and a bad pane id
+				{ID: "t30", Split: "right", Focused: "p31", Panes: []persist.Pane{{ID: "p30", Cwd: a}, {ID: "p31", Cwd: a}, {ID: "p32", Cwd: a}}, // a nested layout
+					Layout: &proto.Node{Split: "down", Nodes: []proto.Node{{Pane: "p30", Weight: 2}, {Split: "right", Nodes: []proto.Node{{Pane: "p31"}, {Pane: "p32"}}}}}},
+				{ID: "t31", Split: "down", Panes: []persist.Pane{{ID: "p33", Cwd: a}, {ID: "p34", Cwd: a}}, // a layout of other panes
+					Layout: &proto.Node{Split: "down", Nodes: []proto.Node{{Pane: "p34"}, {Pane: "p99"}}}},
 				{ID: "t8", Panes: nil},                                 // no pane
 				{ID: "t5", Panes: []persist.Pane{{ID: "p13", Cwd: a}}}, // a repeated tab id
 			}},
@@ -384,9 +389,15 @@ func TestRestoreRepairsInvariants(t *testing.T) {
 		t.Fatalf("s3 = label %q size %dx%d current %s", s3.Label, s3.Cols, s3.Rows, s3.Current)
 	}
 	want := []persist.Tab{
-		{ID: "t5", Split: "", Focused: "p7", Panes: []persist.Pane{{ID: "p7", Cwd: a}}},
-		{ID: "t6", Split: "right", Focused: "p8", Panes: []persist.Pane{{ID: "p8", Cwd: a}, {ID: "p9", Cwd: a}}},
-		{ID: "t7", Split: "right", Focused: "p11", Panes: []persist.Pane{{ID: "p11", Cwd: a}, {ID: "p12", Cwd: a}}},
+		{ID: "t5", Split: "", Focused: "p7", Panes: []persist.Pane{{ID: "p7", Cwd: a}}, Layout: &proto.Node{Pane: "p7"}},
+		{ID: "t6", Split: "right", Focused: "p8", Panes: []persist.Pane{{ID: "p8", Cwd: a}, {ID: "p9", Cwd: a}, {ID: "p10", Cwd: a}},
+			Layout: &proto.Node{Split: "right", Nodes: []proto.Node{{Pane: "p8"}, {Pane: "p9"}, {Pane: "p10"}}}},
+		{ID: "t7", Split: "right", Focused: "p11", Panes: []persist.Pane{{ID: "p11", Cwd: a}, {ID: "p12", Cwd: a}},
+			Layout: &proto.Node{Split: "right", Nodes: []proto.Node{{Pane: "p11"}, {Pane: "p12"}}}},
+		{ID: "t30", Split: "down", Focused: "p31", Panes: []persist.Pane{{ID: "p30", Cwd: a}, {ID: "p31", Cwd: a}, {ID: "p32", Cwd: a}},
+			Layout: &proto.Node{Split: "down", Nodes: []proto.Node{{Pane: "p30", Weight: 2}, {Split: "right", Nodes: []proto.Node{{Pane: "p31"}, {Pane: "p32"}}}}}},
+		{ID: "t31", Split: "down", Focused: "p33", Panes: []persist.Pane{{ID: "p33", Cwd: a}, {ID: "p34", Cwd: a}},
+			Layout: &proto.Node{Split: "down", Nodes: []proto.Node{{Pane: "p33"}, {Pane: "p34"}}}},
 	}
 	if !reflect.DeepEqual(s3.Tabs, want) {
 		t.Fatalf("tabs of s3\n got %+v\nwant %+v", s3.Tabs, want)
@@ -394,7 +405,7 @@ func TestRestoreRepairsInvariants(t *testing.T) {
 	if s10 := p.Sessions[1]; s10.Tabs[0].Split != "" || s10.Cols != 80 || s10.Rows != 24 {
 		t.Fatalf("s10 = %+v", s10)
 	}
-	if got, want := p.Counters, (persist.Counters{Session: 10, Tab: 23, Pane: 23}); got != want {
+	if got, want := p.Counters, (persist.Counters{Session: 10, Tab: 31, Pane: 34}); got != want {
 		t.Fatalf("counters %+v, want %+v", got, want)
 	}
 
@@ -412,8 +423,8 @@ func TestRestoreRepairsInvariants(t *testing.T) {
 	if id, created, _ := m.OpenSession(a, ""); created || id != "s3" {
 		t.Fatalf("open of %s = %s, %v; want the restored s3", a, id, created)
 	}
-	if _, p, _, _ := m.NewTab("s3", ""); p != "p24" {
-		t.Fatalf("new pane %s, want p24", p)
+	if _, p, _, _ := m.NewTab("s3", ""); p != "p35" {
+		t.Fatalf("new pane %s, want p35", p)
 	}
 }
 
@@ -446,4 +457,26 @@ func TestCountersSurviveSaveAndLoad(t *testing.T) {
 	if sid != "s7" || tab != "t13" || pane != "p13" {
 		t.Fatalf("ids after the restart %s %s %s, want s7 t13 p13 (the last before were %v)", sid, tab, pane, last)
 	}
+}
+
+// A file of version 1, written before tabs had a layout tree, is read: its
+// tabs lie in one split of their direction. A file of a later version is
+// set aside.
+func TestAFileOfVersionOneIsRead(t *testing.T) {
+	d := dir(t, "a")
+	path := filepath.Join(dir(t, "state"), persist.FileName)
+	write(t, path, `{"version":1,"counters":{"session":1,"tab":1,"pane":2},"sessions":[{"id":"s1","dir":"`+d+
+		`","label":"a","current":"t1","cols":80,"rows":24,"tabs":[{"id":"t1","split":"down","focused":"p2","panes":[{"id":"p1","cwd":"`+d+`"},{"id":"p2","cwd":"`+d+`"}]}]}]}`, 0o600)
+	p, err := persist.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := proto.Row([]string{"p1", "p2"}, proto.SplitDown)
+	if tb := p.Sessions[0].Tabs[0]; tb.Layout == nil || !reflect.DeepEqual(*tb.Layout, want) || tb.Split != proto.SplitDown {
+		t.Fatalf("tab %+v, layout %+v", tb, tb.Layout)
+	}
+	if p.Version != persist.Version || persist.Version != 2 {
+		t.Fatalf("version %d, package version %d", p.Version, persist.Version)
+	}
+	wantSetAside(t, path, `{"version":3,"sessions":[]}`)
 }

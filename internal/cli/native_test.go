@@ -562,8 +562,8 @@ func TestKeysPrintsEveryEffectiveBinding(t *testing.T) {
 	if has("prefix+c", "tab-new") {
 		t.Errorf("the unbound prefix+c is printed:\n%s", r.stdout)
 	}
-	if n := len(lines); n != 30-1+1+len(hubKeys)+len(copyKeys) {
-		t.Errorf("%d lines, want the 30 defaults less one plus one, and the hub and copy keys", n)
+	if n := len(lines); n != 38-1+1+len(hubKeys)+len(copyKeys) {
+		t.Errorf("%d lines, want the 38 defaults less one plus one, and the hub and copy keys", n)
 	}
 	w.nothingRan()
 }

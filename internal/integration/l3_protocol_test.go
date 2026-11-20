@@ -16,7 +16,7 @@ import (
 
 func TestGenerationMismatchIsRefusedWithText(t *testing.T) {
 	_, socket := startServer(t)
-	for _, gen := range []int{2, 0} {
+	for _, gen := range []int{proto.Gen + 1, 0} {
 		r := dialRaw(t, socket)
 		r.send(fmt.Sprintf(`{"t":"hello","gen":%d,"version":"9.0.0","kind":"interactive"}`, gen))
 		m := r.next()

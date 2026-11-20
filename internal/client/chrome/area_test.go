@@ -316,7 +316,7 @@ func TestBannerAndInactiveFollowTheViewNotTheMode(t *testing.T) {
 		wantBanner := c.Lines()[0]
 		wantInactive := l.Inactive(s, cell)
 		d := screen.New(1, 23)
-		l.Divider(d, s, true, true)
+		l.Divider(d, s, true, middle(d, true, true))
 		wantDivider := d.Lines()
 
 		for _, mode := range []string{"prefix", "switching", "normal"} {
@@ -336,7 +336,7 @@ func TestBannerAndInactiveFollowTheViewNotTheMode(t *testing.T) {
 				t.Errorf("%s, mode %s: inactive = %+v, want %+v", tier.name, mode, got, wantInactive)
 			}
 			d := screen.New(1, 23)
-			l.Divider(d, m, true, true)
+			l.Divider(d, m, true, middle(d, true, true))
 			if got := d.Lines(); strings.Join(got, "\n") != strings.Join(wantDivider, "\n") {
 				t.Errorf("%s, mode %s: the divider changed with the mode", tier.name, mode)
 			}
@@ -385,7 +385,7 @@ func TestDividerPointsAtTheFocusedPane(t *testing.T) {
 				s := areaStale(80, 24)
 				s.Theme, s.WindowFocused, s.View = tier.theme, focus.focused, focus.view
 				c := screen.New(tc.w, tc.h)
-				l.Divider(c, s, tc.vertical, tc.first)
+				l.Divider(c, s, tc.vertical, middle(c, tc.vertical, tc.first))
 				for y := range tc.h {
 					for x := range tc.w {
 						cell := c.At(x, y)
@@ -419,7 +419,7 @@ func TestDividerPointsAtTheFocusedPane(t *testing.T) {
 	}
 	s.Theme = th
 	c := screen.New(5, 1)
-	l.Divider(c, s, false, true)
+	l.Divider(c, s, false, middle(c, false, true))
 	if got := golden.PlainRow(c.Lines()[0]); got != "--^--" {
 		t.Errorf("ASCII divider = %q, want --^--", got)
 	}
@@ -518,6 +518,51 @@ func TestSelectionAndCursorStyles(t *testing.T) {
 		}
 		if out := l.CopyCursor(s, screen.Style{}); out.Underline != 1 || out.Attrs&screen.Bold == 0 {
 			t.Errorf("palette: CopyCursor outside a selection = %+v, want underline and bold", out)
+		}
+	}
+}
+
+// middle is the pointer in the middle cell of the divider c, towards the
+// pane before it when before is set.
+func middle(c *screen.Canvas, vertical, before bool) Pointer {
+	w, h := c.Size()
+	p := Pointer{Toward: PointAfter, At: w / 2}
+	if vertical {
+		p.At = h / 2
+	}
+	if before {
+		p.Toward = PointBefore
+	}
+	return p
+}
+
+func TestDividerPointerGoesWhereItIsToldOrNowhere(t *testing.T) {
+	l := NewLook(LookOptions{})
+	s := areaStale(80, 24)
+	s.View, s.WindowFocused = "showing", true
+	th, err := ui.NewTheme(ui.ThemeOptions{UTF8: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Theme = th
+	for _, tc := range []struct {
+		p    Pointer
+		want string
+	}{
+		{Pointer{Toward: PointNone, At: 2}, "-----"},
+		{Pointer{Toward: PointBefore, At: 1}, "-^---"},
+		{Pointer{Toward: PointAfter, At: 4}, "----v"},
+		{Pointer{Toward: PointAfter, At: 9}, "----v"}, // kept inside the line
+	} {
+		c := screen.New(5, 1)
+		l.Divider(c, s, false, tc.p)
+		if got := golden.PlainRow(c.Lines()[0]); got != tc.want {
+			t.Errorf("look %+v = %q, want %q", tc.p, got, tc.want)
+		}
+		c = screen.New(5, 1)
+		Plain{}.Divider(c, plainState(80, 24), false, tc.p)
+		if got := golden.PlainRow(c.Lines()[0]); got != tc.want {
+			t.Errorf("plain %+v = %q, want %q", tc.p, got, tc.want)
 		}
 	}
 }

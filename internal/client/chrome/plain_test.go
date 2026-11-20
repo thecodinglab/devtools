@@ -205,22 +205,22 @@ func TestPlainPaneMessage(t *testing.T) {
 func TestPlainDividerPointsAtThePaneWithTheKeys(t *testing.T) {
 	s := plainState(80, 24)
 	c := screen.New(1, 5)
-	Plain{}.Divider(c, s, true, true)
+	Plain{}.Divider(c, s, true, middle(c, true, true))
 	if got := strings.Join(c.Lines(), ""); got != "||\x1b[0;1m<\x1b[0m||" {
 		t.Errorf("vertical divider = %q", got)
 	}
 	c = screen.New(5, 1)
-	Plain{}.Divider(c, s, false, false)
+	Plain{}.Divider(c, s, false, middle(c, false, false))
 	if got := golden.PlainRow(c.Lines()[0]); got != "--v--" {
 		t.Errorf("horizontal divider = %q", got)
 	}
 	s.View = "stale"
-	Plain{}.Divider(c, s, false, true)
+	Plain{}.Divider(c, s, false, middle(c, false, true))
 	if got := c.Lines()[0]; got != "-----" {
 		t.Errorf("divider of a stale view = %q, want no pointer", got)
 	}
 	s.View, s.WindowFocused = "showing", false
-	Plain{}.Divider(c, s, false, true)
+	Plain{}.Divider(c, s, false, middle(c, false, true))
 	if got := c.Lines()[0]; got != "-----" {
 		t.Errorf("divider of an unfocused window = %q, want no pointer", got)
 	}

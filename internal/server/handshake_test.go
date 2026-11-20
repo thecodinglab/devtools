@@ -94,9 +94,9 @@ func TestTheRefuseOfANonHelloFirstMessageIsCleanedAndCut(t *testing.T) {
 func TestRefuseNamesBothGenerations(t *testing.T) {
 	ts := newTestServer(t)
 	h := prototest.Interactive()
-	h.Gen = 2
+	h.Gen = 3
 	text := refused(t, ts.socket, h, proto.CodeGeneration)
-	if !strings.Contains(text, "protocol 1") || !strings.Contains(text, "protocol 2") {
+	if !strings.Contains(text, "protocol 2") || !strings.Contains(text, "protocol 3") {
 		t.Fatalf("refuse text %q does not name both generations", text)
 	}
 	h.Gen, h.Kind = proto.Gen, "window"

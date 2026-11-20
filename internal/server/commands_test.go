@@ -179,7 +179,41 @@ func TestEveryRequestOfTheTable(t *testing.T) {
 					t.Fatalf("result %+v, tab %+v", res, tab)
 				}
 			}},
-		{name: "pane.split of a split tab", prep: split, req: func(f *fixture) proto.Typed { return proto.PaneSplit{Pane: f.p, Direction: proto.SplitDown} }, code: proto.CodeLimit},
+		{name: "pane.split of a split tab nests", prep: split, req: func(f *fixture) proto.Typed { return proto.PaneSplit{Pane: f.p, Direction: proto.SplitDown} },
+			check: func(t *testing.T, f *fixture, r proto.Reply, st proto.State) {
+				var res proto.PaneSplitResult
+				r.Msg.Decode(&res)
+				tab := st.Tabs[f.t]
+				want := proto.Node{Split: proto.SplitRight, Nodes: []proto.Node{
+					{Split: proto.SplitDown, Weight: 1, Nodes: []proto.Node{{Pane: f.p, Weight: 1}, {Pane: res.Pane, Weight: 1}}},
+					{Pane: f.p2, Weight: 1},
+				}}
+				if tab.Split != proto.SplitRight || !reflect.DeepEqual(tab.Panes, []string{f.p, res.Pane, f.p2}) || !reflect.DeepEqual(tab.Layout, want) || tab.Focused != res.Pane {
+					t.Fatalf("result %+v, tab %+v", res, tab)
+				}
+			}},
+		{name: "pane.resize", prep: split, req: func(f *fixture) proto.Typed { return proto.PaneResize{Pane: f.p, Direction: "right", Cells: 5} },
+			check: func(t *testing.T, f *fixture, r proto.Reply, st proto.State) {
+				var res proto.PaneResizeResult
+				r.Msg.Decode(&res)
+				l := st.Tabs[f.t].Layout
+				if !res.Moved || len(l.Nodes) != 2 || l.Nodes[0].Weight != l.Nodes[1].Weight+11 {
+					t.Fatalf("result %+v, layout %+v", res, l)
+				}
+			}},
+		{name: "pane.resize without a border that way", prep: split, req: func(f *fixture) proto.Typed { return proto.PaneResize{Pane: f.p, Direction: "up", Cells: 1} },
+			check: func(t *testing.T, f *fixture, r proto.Reply, st proto.State) {
+				var res proto.PaneResizeResult
+				r.Msg.Decode(&res)
+				want := proto.Row([]string{f.p, f.p2}, proto.SplitRight)
+				want.Nodes[0].Weight, want.Nodes[1].Weight = 1, 1
+				if res.Moved || !reflect.DeepEqual(st.Tabs[f.t].Layout, want) {
+					t.Fatalf("result %+v, layout %+v", res, st.Tabs[f.t].Layout)
+				}
+			}},
+		{name: "pane.resize of no pane", req: func(f *fixture) proto.Typed { return proto.PaneResize{Pane: "p99", Direction: "left", Cells: 1} }, code: proto.CodeNoPane, check: unchanged},
+		{name: "pane.resize sideways", req: func(f *fixture) proto.Typed { return proto.PaneResize{Pane: f.p, Direction: "north", Cells: 1} }, code: proto.CodeInvalid, check: unchanged},
+		{name: "pane.resize by nothing", prep: split, req: func(f *fixture) proto.Typed { return proto.PaneResize{Pane: f.p, Direction: "left", Cells: 0} }, code: proto.CodeInvalid},
 		{name: "pane.split of no pane", req: func(f *fixture) proto.Typed { return proto.PaneSplit{Pane: "p99", Direction: proto.SplitRight} }, code: proto.CodeNoPane, check: unchanged},
 		{name: "pane.split sideways", req: func(f *fixture) proto.Typed { return proto.PaneSplit{Pane: f.p, Direction: "left"} }, code: proto.CodeInvalid, check: unchanged},
 

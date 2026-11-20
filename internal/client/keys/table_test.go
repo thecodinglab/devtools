@@ -84,6 +84,14 @@ func TestDefaultsAreTheTableOfThePlan(t *testing.T) {
 		{"ctrl+j", "focus-down", "vim"},
 		{"ctrl+k", "focus-up", "vim"},
 		{"ctrl+l", "focus-right", "vim"},
+		{"prefix+H", "resize-left", "5"},
+		{"prefix+J", "resize-down", "5"},
+		{"prefix+K", "resize-up", "5"},
+		{"prefix+L", "resize-right", "5"},
+		{"prefix+ctrl+left", "resize-left", ""},
+		{"prefix+ctrl+down", "resize-down", ""},
+		{"prefix+ctrl+up", "resize-up", ""},
+		{"prefix+ctrl+right", "resize-right", ""},
 	}
 	for _, tab := range []*Table{Defaults(), mustNew(t, nil, nil)} {
 		got := tab.Bindings()
@@ -249,7 +257,7 @@ func TestUnknownActionIsAStartErrorNamingTheChord(t *testing.T) {
 	// The DROP rows of section 2 are not in the vocabulary (R10).
 	for _, action := range []string{
 		"tab-rename", "rename-tab", "tab-close", "close-tab", "last-pane", "pane-last",
-		"resize-left", "pane-resize", "zoom", "pane-zoom", "workspace-rename", "settings",
+		"resize", "pane-resize", "zoom", "pane-zoom", "workspace-rename", "settings",
 		"sidebar", "goto", "help", "reload", "Hub", "hub-agents", "", "focus",
 	} {
 		startError(t, binds([3]string{"prefix+g", "tab-new", ""}, [3]string{"prefix+f", action, ""}),
@@ -259,6 +267,9 @@ func TestUnknownActionIsAStartErrorNamingTheChord(t *testing.T) {
 	for _, b := range [][3]string{
 		{"prefix+f", "hub", "everything"},
 		{"prefix+f", "tab-new", "2"},
+		{"prefix+f", "resize-left", "0"},
+		{"prefix+f", "resize-left", "100"},
+		{"prefix+f", "resize-left", "05"},
 		{"prefix+f", "tab-select", ""},
 		{"prefix+f", "tab-select", "0"},
 		{"prefix+f", "tab-select", "10"},

@@ -74,6 +74,7 @@ type fleetEnded struct{}
 // so a timer of something that ended since does nothing.
 type (
 	hintsDue  struct{ gen int } // the prefix has been pending for ui.HintDelay
+	repeatDue struct{ gen int } // keys.RepeatTime passed since the last resize of the repeat
 	noticeDue struct{ gen int } // a notice's ui.NoticeLife has passed
 	minuteDue struct{}          // the clock of the status row reached a new minute
 	resizeDue struct{}          // the debounce of the window size ended
@@ -123,6 +124,7 @@ type Model struct {
 	// the modes of the status row (5a.10.1)
 	prefix    bool
 	prefixGen int
+	repeatGen int // of the repeat timer
 	hints     bool
 	hintPage  int
 	confirm   *confirmPane
@@ -263,6 +265,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hintsDue:
 		if m.prefix && msg.gen == m.prefixGen {
 			m.hints = true
+		}
+	case repeatDue:
+		if msg.gen == m.repeatGen {
+			m.keys.EndRepeat()
 		}
 	case noticeDue:
 		if msg.gen == m.noticeGen {

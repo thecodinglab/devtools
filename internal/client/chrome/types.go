@@ -92,7 +92,7 @@ type Chrome interface {
 	MinSize() (cols, rows int)        // 20, 6
 	StatusRows() int                  // rows reserved at the bottom; 1
 	Status(c *screen.Canvas, s State) // c is the status area
-	Divider(c *screen.Canvas, s State, vertical bool, firstFocused bool)
+	Divider(c *screen.Canvas, s State, vertical bool, p Pointer)
 	Banner(c *screen.Canvas, s State) (rows int)        // c is the pane area; 0 or 1; it covers, it never resizes a pane
 	Pad(c *screen.Canvas, s State)                      // the area a clipped or smaller view leaves empty
 	PaneMessage(c *screen.Canvas, s State, text string) // dormant or exited pane
@@ -118,3 +118,16 @@ type Overlay interface {
 type Outcome struct {
 	Switch *session.Target // nil: closed without a choice
 }
+
+// Pointer is the pointer of a divider: towards the pane with the keys, when
+// that pane touches the divider. Toward is PointNone, PointBefore (the pane
+// left of or above the divider) or PointAfter (right of it or below it);
+// At is the pointer's cell along the divider, from 0.
+type Pointer struct{ Toward, At int }
+
+// The values of Pointer.Toward.
+const (
+	PointNone   = 0
+	PointBefore = -1
+	PointAfter  = 1
+)

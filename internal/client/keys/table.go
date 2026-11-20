@@ -58,12 +58,20 @@ var defaults = []struct{ chord, action, arg string }{
 	{"ctrl+j", "focus-down", "vim"},
 	{"ctrl+k", "focus-up", "vim"},
 	{"ctrl+l", "focus-right", "vim"},
+	{"prefix+H", "resize-left", "5"},
+	{"prefix+J", "resize-down", "5"},
+	{"prefix+K", "resize-up", "5"},
+	{"prefix+L", "resize-right", "5"},
+	{"prefix+ctrl+left", "resize-left", ""},
+	{"prefix+ctrl+down", "resize-down", ""},
+	{"prefix+ctrl+up", "resize-up", ""},
+	{"prefix+ctrl+right", "resize-right", ""},
 }
 
 // vocabulary is the closed action vocabulary: every action a chord can be
 // bound to, with the arguments it takes. An action that is not here (the
-// DROP rows of section 2 among them: rename, resize, zoom, last pane) is a
-// start error (R10).
+// DROP rows of section 2 among them: rename, zoom, last pane) is a start
+// error (R10).
 var vocabulary = map[string]func(arg string) bool{
 	"prefix":       none,
 	"hub":          oneOf("", "sessions", "agents", "new"),
@@ -82,6 +90,10 @@ var vocabulary = map[string]func(arg string) bool{
 	"focus-down":   oneOf("", "vim"),
 	"focus-up":     oneOf("", "vim"),
 	"focus-right":  oneOf("", "vim"),
+	"resize-left":  cells,
+	"resize-down":  cells,
+	"resize-up":    cells,
+	"resize-right": cells,
 }
 
 // argHelp says what each action takes, for the start error of a wrong
@@ -91,6 +103,8 @@ var argHelp = map[string]string{
 	"tab-select": "a tab number from 1 to 9",
 	"focus-left": "no argument or vim", "focus-down": "no argument or vim",
 	"focus-up": "no argument or vim", "focus-right": "no argument or vim",
+	"resize-left": cellsHelp, "resize-down": cellsHelp,
+	"resize-up": cellsHelp, "resize-right": cellsHelp,
 }
 
 func none(arg string) bool { return arg == "" }
@@ -104,6 +118,18 @@ func oneOf(args ...string) func(string) bool {
 		}
 		return false
 	}
+}
+
+// cellsHelp says what a resize takes.
+const cellsHelp = "no argument (one cell) or a number of cells from 1 to 99"
+
+// cells is the argument of a resize: none for one cell, or 1 to 99.
+func cells(arg string) bool {
+	if arg == "" {
+		return true
+	}
+	n, err := strconv.Atoi(arg)
+	return err == nil && n >= 1 && n <= 99 && arg == strconv.Itoa(n)
 }
 
 func tabNumber(arg string) bool {

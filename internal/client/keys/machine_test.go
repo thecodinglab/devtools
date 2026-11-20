@@ -418,3 +418,45 @@ func FuzzHandle(f *testing.F) {
 		}
 	})
 }
+
+func TestAResizeRepeatsWithoutThePrefix(t *testing.T) {
+	m := NewMachine(Defaults())
+	shiftL := Event{Name: "l", Mod: proto.ModShift, Text: "L"}
+	shiftH := Event{Name: "h", Mod: proto.ModShift, Text: "H"}
+	ctrlLeft := Event{Name: "left", Mod: proto.ModCtrl}
+	right, left := Action{"resize-right", "5"}, Action{"resize-left", ""}
+
+	want(t, "prefix", m.Handle(ctrlSpace, Context{}), Swallow, true, Action{})
+	r := m.Handle(shiftL, Context{})
+	want(t, "prefix+L", r, Act, false, right)
+	if !r.Repeat {
+		t.Fatalf("prefix+L = %+v, want a repeat", r)
+	}
+	// Further resize keys act without the prefix, also a held one and one
+	// of another resize.
+	want(t, "L again", m.Handle(shiftL, Context{}), Act, false, right)
+	want(t, "L held", m.Handle(repeat(shiftL), Context{}), Act, false, right)
+	want(t, "release of L", m.Handle(release(shiftL), Context{}), Swallow, false, Action{})
+	if r := m.Handle(ctrlLeft, Context{}); r.Verdict != Act || r.Action != left || !r.Repeat {
+		t.Fatalf("ctrl+left in the repeat = %+v", r)
+	}
+	// A modifier alone keeps the repeat.
+	m.Handle(Event{Name: "leftshift", Mod: proto.ModShift}, Context{})
+	want(t, "H", m.Handle(shiftH, Context{}), Act, false, Action{"resize-left", "5"})
+	// Any other key ends it and is what it is without the repeat.
+	want(t, "x", m.Handle(key("x"), Context{}), Forward, false, Action{})
+	want(t, "L after x", m.Handle(shiftL, Context{}), Forward, false, Action{})
+
+	// The client's clock ends it too.
+	m.Handle(ctrlSpace, Context{})
+	m.Handle(shiftL, Context{})
+	m.EndRepeat()
+	want(t, "L after the repeat time", m.Handle(shiftL, Context{}), Forward, false, Action{})
+
+	// Another action after the prefix does not repeat.
+	m.Handle(ctrlSpace, Context{})
+	if r := m.Handle(key("v"), Context{}); r.Repeat {
+		t.Fatalf("prefix+v = %+v, want no repeat", r)
+	}
+	want(t, "L after prefix+v", m.Handle(shiftL, Context{}), Forward, false, Action{})
+}

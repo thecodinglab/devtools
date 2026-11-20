@@ -39,7 +39,7 @@ func (s *State) OpenSession(dir, label string) (id string, created bool, r Resul
 func (s *State) addTab(b *batch, x *sess, dir string) (tab, pane string) {
 	tid := issue("t", &s.next.Tab)
 	pid := s.addPane(b, x.ID, tid, dir)
-	s.tabs[tid] = &proto.Tab{ID: tid, Session: x.ID, Index: len(x.Tabs) + 1, Panes: []string{pid}, Split: proto.SplitNone, Focused: pid}
+	s.tabs[tid] = &proto.Tab{ID: tid, Session: x.ID, Index: len(x.Tabs) + 1, Panes: []string{pid}, Split: proto.SplitNone, Focused: pid, Layout: proto.Node{Pane: pid}}
 	x.Tabs = append(x.Tabs, tid)
 	b.touch(tid)
 	b.touch(x.ID)
@@ -132,7 +132,7 @@ func (s *State) makeCurrent(b *batch, x *sess, tab string) {
 // their size until their tab becomes current.
 func (s *State) reconcile(b *batch, x *sess) {
 	t := s.tabs[x.Current]
-	rects := Layout(x.cols, x.rows, t.Split)
+	rects := Layout(x.cols, x.rows, t.Layout)
 	for i, pid := range t.Panes {
 		p, r := s.panes[pid], rects[i]
 		switch p.State {
@@ -166,7 +166,7 @@ func (s *State) spawn(b *batch, x *sess, p *pane, r Rect) {
 // rectOf returns the rectangle of a pane in its tab's layout.
 func (s *State) rectOf(x *sess, p *pane) Rect {
 	t := s.tabs[p.Tab]
-	rects := Layout(x.cols, x.rows, t.Split)
+	rects := Layout(x.cols, x.rows, t.Layout)
 	for i, pid := range t.Panes {
 		if pid == p.ID {
 			return rects[i]
@@ -245,11 +245,13 @@ func (s *State) closeTab(b *batch, t *proto.Tab) {
 	}
 }
 
-// Split adds a second pane to the pane's tab, right of it or below it, and
-// focuses it. The new pane starts in cwd; when cwd is empty, in the split
-// pane's directory when it is known and exists, else in the session
-// directory. A tab with two panes, or a split whose panes would be below
-// the minimum at the session's size, is a limit.
+// Split adds a pane to the pane's tab, right of it or below it, and
+// focuses it. The two share the space the pane had; when the pane's split
+// has that direction already, the new pane joins it, else the pane becomes
+// a split of the two. The new pane starts in cwd; when cwd is empty, in the
+// split pane's directory when it is known and exists, else in the session
+// directory. A tab with MaxPanes panes, or a split whose panes would be
+// below the minimum at the session's size, is a limit.
 func (s *State) Split(pane, direction, cwd string) (id string, r Result, err *Error) {
 	if direction != proto.SplitRight && direction != proto.SplitDown {
 		return "", Result{}, errf(proto.CodeInvalid, "direction %q is not right or down", direction)
@@ -259,11 +261,24 @@ func (s *State) Split(pane, direction, cwd string) (id string, r Result, err *Er
 		return "", Result{}, errf(proto.CodeNoPane, "pane %s does not exist", pane)
 	}
 	t, x := s.tabs[p.Tab], s.sessions[p.Session]
-	if len(t.Panes) == 2 {
-		return "", Result{}, errf(proto.CodeLimit, "tab %d already has two panes", t.Index)
+	if len(t.Panes) >= proto.MaxPanes {
+		return "", Result{}, errf(proto.CodeLimit, "tab %d already has %d panes", t.Index, proto.MaxPanes)
 	}
-	if !splitFits(x.cols, x.rows, direction) {
-		return "", Result{}, errf(proto.CodeLimit, "a pane cannot be smaller than %d by %d", MinPaneCols, MinPaneRows)
+	tree := t.Layout.Clone()
+	rr := s.rectOf(x, p)
+	ext, low := rr.W, MinPaneCols
+	if direction == proto.SplitDown {
+		ext, low = rr.H, MinPaneRows
+	}
+	tooSmall := errf(proto.CodeLimit, "a pane cannot be smaller than %d by %d", MinPaneCols, MinPaneRows)
+	if ext-1 < 2*low {
+		return "", Result{}, tooSmall
+	}
+	next := s.next
+	id = issue("p", &next.Pane)
+	insertSplit(&tree, pane, id, direction, x.cols, x.rows)
+	if !fits(&tree, x.cols, x.rows) {
+		return "", Result{}, tooSmall
 	}
 	if cwd == "" {
 		cwd = x.Dir
@@ -272,15 +287,23 @@ func (s *State) Split(pane, direction, cwd string) (id string, r Result, err *Er
 		}
 	}
 	b := s.batch()
-	id = s.addPane(b, x.ID, t.ID, cwd)
-	t.Panes = append(t.Panes, id)
-	t.Split = direction
+	if got := s.addPane(b, x.ID, t.ID, cwd); got != id {
+		panic("model: split issued " + got + ", planned " + id)
+	}
+	setLayout(t, tree)
 	t.Focused = id
 	b.touch(t.ID)
 	if x.Current == t.ID {
 		s.reconcile(b, x)
 	}
 	return id, b.result(), nil
+}
+
+// setLayout sets a tab's tree, and its panes and split from it.
+func setLayout(t *proto.Tab, tree proto.Node) {
+	t.Layout = tree
+	t.Panes = tree.Leaves()
+	t.Split = tree.Split
 }
 
 // Focus makes a pane the focused pane of its tab.
@@ -300,40 +323,29 @@ func (s *State) Focus(pane string) (Result, *Error) {
 }
 
 // FocusDir moves the focus of the pane's tab from pane in a direction (3.3):
-// in a right split "right" from the first and "left" from the second pane
-// move, in a down split "down" from the first and "up" from the second.
-// Anything else does not move (no wraparound): target is pane and moved is
-// false.
+// to the pane next to it on that side, at the session's size. Of the panes
+// along that side it is the one that shares the most rows (left, right) or
+// columns (up, down) with pane, the top or left one on a tie. At the edge
+// of the tab the focus does not move (no wraparound): target is pane and
+// moved is false.
 func (s *State) FocusDir(pane, direction string) (target string, moved bool, r Result, err *Error) {
-	switch direction {
-	case "left", "right", "up", "down":
-	default:
+	a, ok := axisOf(direction)
+	if !ok {
 		return "", false, Result{}, errf(proto.CodeInvalid, "direction %q is not left, right, up or down", direction)
 	}
 	p, ok := s.panes[pane]
 	if !ok {
 		return "", false, Result{}, errf(proto.CodeNoPane, "pane %s does not exist", pane)
 	}
-	t := s.tabs[p.Tab]
-	if len(t.Panes) != 2 {
+	t, x := s.tabs[p.Tab], s.sessions[p.Session]
+	tree := t.Layout.Clone()
+	path := pathTo(&tree, pane)
+	split, _, next, ok := neighbour(path, a, a.forward)
+	if !ok {
 		return pane, false, Result{}, nil
 	}
-	first := t.Panes[0] == pane
-	var forward, back string
-	switch t.Split {
-	case proto.SplitRight:
-		forward, back = "right", "left"
-	case proto.SplitDown:
-		forward, back = "down", "up"
-	}
-	switch {
-	case first && direction == forward:
-		target = t.Panes[1]
-	case !first && direction == back:
-		target = t.Panes[0]
-	default:
-		return pane, false, Result{}, nil
-	}
+	at := rects(&tree, x.cols, x.rows)
+	target = nearest(&split.Nodes[next], at[path[len(path)-1]], a, at).Pane
 	b := s.batch()
 	if t.Focused != target {
 		t.Focused = target
@@ -342,9 +354,61 @@ func (s *State) FocusDir(pane, direction string) (target string, moved bool, r R
 	return target, true, b.result(), nil
 }
 
-// ClosePane closes a pane, also when its program ended normally. With two
-// panes the other one stays, takes the whole tab and is focused; with one
-// it is CloseTab of its tab.
+// Resize moves a border of the pane by cells in a direction, at the
+// session's size: the border on that side of the pane when it has a
+// neighbour there (the pane grows), else the border on the other side (it
+// shrinks). Of the splits on the way to the pane it is the border of the
+// closest one along the direction. The node that gives up cells keeps its
+// minimum, so the border moves less than asked when there is not that much
+// room, and not at all at the minimum or with no border along the
+// direction: moved is false and nothing changes. The nodes on either side
+// share what they got or gave in proportion to their weights.
+func (s *State) Resize(pane, direction string, cells int) (moved bool, r Result, err *Error) {
+	a, ok := axisOf(direction)
+	if !ok {
+		return false, Result{}, errf(proto.CodeInvalid, "direction %q is not left, right, up or down", direction)
+	}
+	if cells < 1 {
+		return false, Result{}, errf(proto.CodeInvalid, "cells %d is not at least 1", cells)
+	}
+	p, ok := s.panes[pane]
+	if !ok {
+		return false, Result{}, errf(proto.CodeNoPane, "pane %s does not exist", pane)
+	}
+	t, x := s.tabs[p.Tab], s.sessions[p.Session]
+	tree := t.Layout.Clone()
+	pin(&tree, x.cols, x.rows)
+	path := pathTo(&tree, pane)
+	grow, shrink := -1, -1
+	split, at, next, ok := neighbour(path, a, a.forward)
+	if ok {
+		grow, shrink = at, next // the border on the side of the direction
+	} else if split, at, next, ok = neighbour(path, a, !a.forward); ok {
+		grow, shrink = next, at // the border on the other side
+	} else {
+		return false, Result{}, nil
+	}
+	g, sh := &split.Nodes[grow], &split.Nodes[shrink]
+	right := split.Split == proto.SplitRight
+	d := min(cells, weight(sh)-minExtent(sh, right))
+	if d <= 0 {
+		return false, Result{}, nil
+	}
+	g.Weight += d
+	sh.Weight -= d
+	b := s.batch()
+	setLayout(t, tree)
+	b.touch(t.ID)
+	if x.Current == t.ID {
+		s.reconcile(b, x)
+	}
+	return true, b.result(), nil
+}
+
+// ClosePane closes a pane, also when its program ended normally. The pane
+// next to it before it in its split takes its space (the one after it when
+// it was the first); when it was focused, the pane of that space next to it
+// is focused. With one pane it is CloseTab of its tab.
 func (s *State) ClosePane(pane string) (Result, *Error) {
 	p, ok := s.panes[pane]
 	if !ok {
@@ -357,13 +421,12 @@ func (s *State) ClosePane(pane string) (Result, *Error) {
 		return b.result(), nil
 	}
 	s.removePane(b, pane)
-	other := t.Panes[0]
-	if other == pane {
-		other = t.Panes[1]
+	tree := t.Layout.Clone()
+	focus := removeLeaf(&tree, pane, x.cols, x.rows)
+	setLayout(t, tree)
+	if t.Focused == pane {
+		t.Focused = focus
 	}
-	t.Panes = []string{other}
-	t.Split = proto.SplitNone
-	t.Focused = other
 	b.touch(t.ID)
 	if x.Current == t.ID {
 		s.reconcile(b, x)

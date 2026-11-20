@@ -18,7 +18,7 @@ func TestLimitsAreTheValuesOfSectionFour(t *testing.T) {
 			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
 		}
 	}
-	if Gen != 1 {
+	if Gen != 2 {
 		t.Errorf("Gen = %d", Gen)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -67,9 +68,112 @@ type Tab struct {
 	ID      string   `json:"id"`
 	Session string   `json:"session"`
 	Index   int      `json:"index"`   // from 1, renumbered when a tab closes
-	Panes   []string `json:"panes"`   // 1 or 2 ids, first is left or top
-	Split   string   `json:"split"`   // SplitNone, SplitRight, SplitDown
+	Panes   []string `json:"panes"`   // 1 to MaxPanes ids, the leaves of Layout in order: the first is top left
+	Split   string   `json:"split"`   // the direction of Layout's root: SplitNone with one pane, else SplitRight or SplitDown
 	Focused string   `json:"focused"` // pane id
+	Layout  Node     `json:"layout"`  // how the panes share the tab; read it through Tree
+}
+
+// Node is a node of a tab's layout tree. A leaf names one pane (Pane set,
+// no Nodes). A split (Split SplitRight or SplitDown, two or more Nodes)
+// lays its nodes out side by side, the first left, or stacked, the first on
+// top, with a one-cell divider between two of them: each node gets a share
+// of the split's width or height, less the dividers, in proportion to its
+// Weight (0 counts as 1). A weight is at most MaxWeight. The weight of the
+// root is not used.
+type Node struct {
+	Pane   string `json:"pane,omitempty"`
+	Split  string `json:"split,omitempty"`
+	Weight int    `json:"weight,omitempty"`
+	Nodes  []Node `json:"nodes,omitempty"`
+}
+
+// MaxWeight bounds the weight of a layout node.
+const MaxWeight = 1 << 20
+
+// Leaf reports whether n is a leaf: a node that names a pane.
+func (n Node) Leaf() bool { return len(n.Nodes) == 0 }
+
+// Leaves returns the panes of the tree in order: depth first, the first
+// node of a split before the next.
+func (n Node) Leaves() []string {
+	var out []string
+	var walk func(Node)
+	walk = func(n Node) {
+		if n.Leaf() {
+			out = append(out, n.Pane)
+			return
+		}
+		for _, c := range n.Nodes {
+			walk(c)
+		}
+	}
+	walk(n)
+	return out
+}
+
+// Clone returns a deep copy of the tree.
+func (n Node) Clone() Node {
+	o := n
+	if n.Nodes != nil {
+		o.Nodes = make([]Node, len(n.Nodes))
+		for i, c := range n.Nodes {
+			o.Nodes[i] = c.Clone()
+		}
+	}
+	return o
+}
+
+// wellFormed reports whether every node of the tree is a leaf with a pane
+// or a split with a direction and at least two nodes, with weights from 0
+// to MaxWeight.
+func (n Node) wellFormed() bool {
+	if n.Weight < 0 || n.Weight > MaxWeight {
+		return false
+	}
+	if n.Leaf() {
+		return n.Pane != "" && n.Split == ""
+	}
+	if n.Pane != "" || (n.Split != SplitRight && n.Split != SplitDown) || len(n.Nodes) < 2 {
+		return false
+	}
+	for _, c := range n.Nodes {
+		if !c.wellFormed() {
+			return false
+		}
+	}
+	return true
+}
+
+// Row returns the layout of panes in one split of direction split (one
+// leaf for a single pane), every pane with the same share: the layout of a
+// tab whose Layout is absent or does not fit its panes. A split that is not
+// SplitDown is SplitRight.
+func Row(panes []string, split string) Node {
+	if len(panes) == 1 {
+		return Node{Pane: panes[0]}
+	}
+	if split != SplitDown {
+		split = SplitRight
+	}
+	n := Node{Split: split, Nodes: make([]Node, len(panes))}
+	for i, p := range panes {
+		n.Nodes[i] = Node{Pane: p}
+	}
+	return n
+}
+
+// Tree returns the layout of the tab as a receiver may use it: Layout when
+// it is well formed and its leaves are exactly Panes in order, else Row of
+// Panes and Split. A tab without panes has the empty tree.
+func (t Tab) Tree() Node {
+	if len(t.Panes) == 0 {
+		return Node{}
+	}
+	if t.Layout.wellFormed() && slices.Equal(t.Layout.Leaves(), t.Panes) {
+		return t.Layout
+	}
+	return Row(t.Panes, t.Split)
 }
 
 // Pane is one pane of a tab.

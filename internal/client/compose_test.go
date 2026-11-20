@@ -257,3 +257,33 @@ func TestTheDividerFollowsTheFocusedPaneAndTheWindowFocus(t *testing.T) {
 		t.Fatalf("the focus moved back to p1 and the pointer is %+v, want %+v", got, left)
 	}
 }
+
+// With p1 | (p2 / p3) every divider is drawn, and only those the focused
+// pane touches point at it.
+func TestEveryDividerIsDrawnAndThoseAtTheFocusedPanePoint(t *testing.T) {
+	d := clienttest.New(t, client.Options{})
+	s := snapshot(proto.SplitRight, proto.Pane{ID: "p1"}, proto.Pane{ID: "p2"}, proto.Pane{ID: "p3"})
+	s.Tabs[0].Layout = proto.Node{Split: proto.SplitRight, Nodes: []proto.Node{
+		{Pane: "p1"},
+		{Split: proto.SplitDown, Nodes: []proto.Node{{Pane: "p2"}, {Pane: "p3"}}},
+	}}
+	s.Tabs[0].Focused = "p3"
+	d.F.SetState(s)
+	d.Update(online())
+	d.Update(shown("", s))
+	d.Update(frame("p1", 1, 40, 23, true))
+	d.Update(frame("p2", 1, 39, 11, true))
+	d.Update(frame("p3", 1, 39, 11, true))
+	sc := d.Screen()
+	// the vertical divider at column 40 points right at row 17, the middle
+	// of p3's rows; the horizontal one at row 11 points down
+	if got := []rune(sc.Row(17))[40]; got != '>' {
+		t.Fatalf("row 17 %q: want > at column 40", sc.Row(17))
+	}
+	if got := []rune(sc.Row(5))[40]; got != '|' {
+		t.Fatalf("row 5 %q: want | at column 40, no pointer beside p2", sc.Row(5))
+	}
+	if row := sc.Row(11); !strings.HasPrefix(string([]rune(row)[41:]), "-") || !strings.Contains(row, "v") {
+		t.Fatalf("row 11 %q: want the divider of p2 and p3 pointing down", row)
+	}
+}

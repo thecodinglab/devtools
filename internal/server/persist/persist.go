@@ -1,7 +1,7 @@
 // Package persist is state.json, the structure of a server that survives a
 // restart (3.9 of the plan): the id counters, and per session its id,
 // directory, label, current tab, last-shown time and size, and per tab its
-// split, its focused pane and each pane's id and directory. Screen contents,
+// layout, its focused pane and each pane's id and directory. Screen contents,
 // history, titles, agent state and anything per client are not saved.
 //
 // Save writes atomically: a temp file in the same directory, fsynced,
@@ -24,14 +24,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"devtools/internal/proto"
 )
 
 // FileName is the name of the state file inside the state directory.
 const FileName = "state.json"
 
-// Version is the version of the file format this package writes and reads.
-// A file with another version is set aside.
-const Version = 1
+// Version is the version of the file format this package writes. It reads
+// it and version 1, the format before tabs had a layout tree; a file with
+// any other version is set aside. A server of version 1 sets a file of
+// version 2 aside rather than cut its tabs to two panes.
+const Version = 2
 
 // State is the content of state.json.
 type State struct {
@@ -61,12 +65,15 @@ type Session struct {
 	Tabs    []Tab  `json:"tabs"`
 }
 
-// Tab is one tab: one or two panes, the first left or top.
+// Tab is one tab: its panes in the order of the leaves of its layout, the
+// first top left. A file without a layout (written before tabs had more
+// than two panes) lays its panes out in one split of direction Split.
 type Tab struct {
-	ID      string `json:"id"`
-	Split   string `json:"split"` // "", "right", "down"
-	Focused string `json:"focused"`
-	Panes   []Pane `json:"panes"`
+	ID      string      `json:"id"`
+	Split   string      `json:"split"` // "", "right", "down": the direction of the layout's root
+	Focused string      `json:"focused"`
+	Panes   []Pane      `json:"panes"`
+	Layout  *proto.Node `json:"layout,omitempty"`
 }
 
 // Pane is one pane: its id and its last known directory.
@@ -130,7 +137,7 @@ func decode(b []byte) (State, error) {
 	if dec.More() {
 		return State{}, errors.New("data after the state object")
 	}
-	if s.Version != Version {
+	if s.Version != Version && s.Version != 1 {
 		return State{}, fmt.Errorf("unknown version %d", s.Version)
 	}
 	return s, nil

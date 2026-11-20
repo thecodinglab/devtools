@@ -34,7 +34,7 @@ const (
 	answerWait  = 10 * time.Second // and this long for view.ok once view.set is sent (not in 3.5.4: a server that never answers)
 	framesWait  = 5 * time.Second  // and this long for the full frames after view.ok
 	maxPartials = 512              // partial frames buffered before the last full one
-	maxViewPane = 2                // a tab has one or two panes (4.2.2)
+	maxViewPane = proto.MaxPanes   // the panes of a tab (4.1)
 
 	// What a switch buffers in all, the pieces of full frames included
 	// (SEC12): the 512 partial frames of 3.5.4 plus the first full frame of

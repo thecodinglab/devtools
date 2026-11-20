@@ -9,6 +9,7 @@ package client
 
 import (
 	"reflect"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,7 +30,7 @@ type composition struct {
 	state     chrome.State
 	layout    panes.Layout
 	overlayOn bool
-	divider   dividerKey // what the divider was last drawn from
+	divider   dividerKey // what the dividers were last drawn from
 
 	refreshes int       // state reads asked for
 	refreshed time.Time // when the last one was asked for
@@ -196,18 +197,22 @@ func (m *Model) drawPanes(pc *screen.Canvas, area screen.Rect, layout panes.Layo
 			m.chrome.PaneMessage(pc.Sub(r), st, exitText(p))
 		}
 	}
-	// The divider's pointer shows which pane has the keys and its style
+	// A divider's pointer shows which pane has the keys and its style
 	// whether the window has the terminal's focus (5a.6.5); neither changes
-	// the layout, so the divider is drawn again whenever they change too.
-	if d := layout.Divider; d.W > 0 && d.H > 0 {
-		t, _ := m.shownTab()
-		k := dividerKey{
-			vertical:      t.Split != proto.SplitDown,
-			firstFocused:  len(t.Panes) > 0 && m.focusedPane() == t.Panes[0],
-			windowFocused: st.WindowFocused,
+	// the layout, so the dividers are drawn again whenever they change too.
+	// Only a divider the focused pane touches points.
+	if len(layout.Dividers) > 0 {
+		focused, has := layout.Panes[m.focusedPane()]
+		k := dividerKey{pointers: make([]chrome.Pointer, len(layout.Dividers)), windowFocused: st.WindowFocused}
+		for i, d := range layout.Dividers {
+			if has {
+				k.pointers[i] = pointerOf(d, focused)
+			}
 		}
-		if full || inactive || k != m.comp.divider {
-			m.chrome.Divider(pc.Sub(d), st, k.vertical, k.firstFocused)
+		if full || inactive || !k.equal(m.comp.divider) {
+			for i, d := range layout.Dividers {
+				m.chrome.Divider(pc.Sub(d.Rect), st, d.Vertical, k.pointers[i])
+			}
 		}
 		m.comp.divider = k
 	}
@@ -228,9 +233,46 @@ func (m *Model) drawPanes(pc *screen.Canvas, area screen.Rect, layout panes.Layo
 	m.drawCopy(pc, layout, st)
 }
 
-// dividerKey is what the divider is drawn from besides the layout.
+// dividerKey is what the dividers are drawn from besides the layout.
 type dividerKey struct {
-	vertical, firstFocused, windowFocused bool
+	pointers      []chrome.Pointer // one per divider of the layout
+	windowFocused bool
+}
+
+func (k dividerKey) equal(o dividerKey) bool {
+	return k.windowFocused == o.windowFocused && slices.Equal(k.pointers, o.pointers)
+}
+
+// pointerOf is the pointer of divider d when the focused pane lies at f: in
+// the middle of the cells the two share along the divider, towards f, when f
+// touches d; else none.
+func pointerOf(d panes.Divider, f screen.Rect) chrome.Pointer {
+	r := d.Rect
+	if f.W == 0 || f.H == 0 {
+		return chrome.Pointer{}
+	}
+	var toward, lo, hi, base int
+	if d.Vertical {
+		switch {
+		case f.X+f.W == r.X:
+			toward = chrome.PointBefore
+		case f.X == r.X+r.W:
+			toward = chrome.PointAfter
+		}
+		lo, hi, base = max(f.Y, r.Y), min(f.Y+f.H, r.Y+r.H), r.Y
+	} else {
+		switch {
+		case f.Y+f.H == r.Y:
+			toward = chrome.PointBefore
+		case f.Y == r.Y+r.H:
+			toward = chrome.PointAfter
+		}
+		lo, hi, base = max(f.X, r.X), min(f.X+f.W, r.X+r.W), r.X
+	}
+	if toward == chrome.PointNone || hi <= lo {
+		return chrome.Pointer{}
+	}
+	return chrome.Pointer{Toward: toward, At: (lo+hi)/2 - base}
 }
 
 // exitText is the first line of the pane message of an ended program

@@ -517,7 +517,7 @@ func (r *rawConn) reply(id uint64) proto.Msg {
 // helloJSON returns a hello as JSON text: a generation 1 hello of the
 // kind, with the further fields extra.
 func helloJSON(kind string, extra ...string) string {
-	fields := append([]string{`"t":"hello"`, `"gen":1`, `"version":"0.0.0-raw"`, `"kind":` + strconv.Quote(kind)}, extra...)
+	fields := append([]string{`"t":"hello"`, `"gen":` + strconv.Itoa(proto.Gen), `"version":"0.0.0-raw"`, `"kind":` + strconv.Quote(kind)}, extra...)
 	return "{" + strings.Join(fields, ",") + "}"
 }
 

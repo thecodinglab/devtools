@@ -54,8 +54,10 @@ func partition(t *testing.T, l Layout, area screen.Rect) int {
 					n++
 				}
 			}
-			if l.Divider.Contains(x, y) {
-				n++
+			for _, d := range l.Dividers {
+				if d.Rect.Contains(x, y) {
+					n++
+				}
 			}
 			for _, r := range l.Pad {
 				if r.Contains(x, y) {
@@ -68,7 +70,7 @@ func partition(t *testing.T, l Layout, area screen.Rect) int {
 			}
 		}
 	}
-	for _, r := range append(append([]screen.Rect{l.Divider}, l.Pad...), values(l.Panes)...) {
+	for _, r := range append(append(dividers(l), l.Pad...), values(l.Panes)...) {
 		if r.W == 0 && r.H == 0 {
 			continue
 		}
@@ -77,6 +79,22 @@ func partition(t *testing.T, l Layout, area screen.Rect) int {
 		}
 	}
 	return pad
+}
+
+func dividers(l Layout) []screen.Rect {
+	var out []screen.Rect
+	for _, d := range l.Dividers {
+		out = append(out, d.Rect)
+	}
+	return out
+}
+
+// wantDivider checks that the layout has exactly one divider, at want.
+func wantDivider(t *testing.T, l Layout, want screen.Rect) {
+	t.Helper()
+	if len(l.Dividers) != 1 || l.Dividers[0].Rect != want {
+		t.Fatalf("dividers = %+v, want one at %+v", l.Dividers, want)
+	}
 }
 
 func values(m map[string]screen.Rect) []screen.Rect {
@@ -93,7 +111,7 @@ func TestLayoutPlacesTheSecondPaneAfterTheDivider(t *testing.T) {
 		area := screen.Rect{X: 0, Y: 0, W: 20, H: 5}
 		l := s.Layout(area)
 		wantRect(t, "p1", l.Panes["p1"], screen.Rect{X: 0, Y: 0, W: 9, H: 5})
-		wantRect(t, "divider", l.Divider, screen.Rect{X: 9, Y: 0, W: 1, H: 5})
+		wantDivider(t, l, screen.Rect{X: 9, Y: 0, W: 1, H: 5})
 		wantRect(t, "p2", l.Panes["p2"], screen.Rect{X: 10, Y: 0, W: 10, H: 5})
 		if n := partition(t, l, area); n != 0 {
 			t.Fatalf("%d pad cells, want none", n)
@@ -104,7 +122,7 @@ func TestLayoutPlacesTheSecondPaneAfterTheDivider(t *testing.T) {
 		area := screen.Rect{X: 0, Y: 0, W: 20, H: 5}
 		l := s.Layout(area)
 		wantRect(t, "p1", l.Panes["p1"], screen.Rect{X: 0, Y: 0, W: 20, H: 2})
-		wantRect(t, "divider", l.Divider, screen.Rect{X: 0, Y: 2, W: 20, H: 1})
+		wantDivider(t, l, screen.Rect{X: 0, Y: 2, W: 20, H: 1})
 		wantRect(t, "p2", l.Panes["p2"], screen.Rect{X: 0, Y: 3, W: 20, H: 2})
 		if n := partition(t, l, area); n != 0 {
 			t.Fatalf("%d pad cells, want none", n)
@@ -115,7 +133,7 @@ func TestLayoutPlacesTheSecondPaneAfterTheDivider(t *testing.T) {
 		area := screen.Rect{X: 2, Y: 1, W: 10, H: 3}
 		l := s.Layout(area)
 		wantRect(t, "p1", l.Panes["p1"], screen.Rect{X: 2, Y: 1, W: 4, H: 3})
-		wantRect(t, "divider", l.Divider, screen.Rect{X: 6, Y: 1, W: 1, H: 3})
+		wantDivider(t, l, screen.Rect{X: 6, Y: 1, W: 1, H: 3})
 		wantRect(t, "p2", l.Panes["p2"], screen.Rect{X: 7, Y: 1, W: 5, H: 3})
 		partition(t, l, area)
 	})
@@ -123,8 +141,8 @@ func TestLayoutPlacesTheSecondPaneAfterTheDivider(t *testing.T) {
 		s := onePane(t, 20, 5, "x")
 		l := s.Layout(screen.Rect{W: 20, H: 5})
 		wantRect(t, "p1", l.Panes["p1"], screen.Rect{W: 20, H: 5})
-		if l.Divider.W != 0 || l.Divider.H != 0 {
-			t.Fatalf("divider %+v with one pane", l.Divider)
+		if len(l.Dividers) != 0 {
+			t.Fatalf("dividers %+v with one pane", l.Dividers)
 		}
 	})
 }
@@ -134,7 +152,7 @@ func TestLayoutClipsAtTheAreaEdge(t *testing.T) {
 	area := screen.Rect{X: 0, Y: 0, W: 20, H: 6}
 	l := s.Layout(area)
 	wantRect(t, "p1", l.Panes["p1"], screen.Rect{X: 0, Y: 0, W: 15, H: 6})
-	wantRect(t, "divider", l.Divider, screen.Rect{X: 15, Y: 0, W: 1, H: 6})
+	wantDivider(t, l, screen.Rect{X: 15, Y: 0, W: 1, H: 6})
 	wantRect(t, "p2", l.Panes["p2"], screen.Rect{X: 16, Y: 0, W: 4, H: 6})
 	if n := partition(t, l, area); n != 0 {
 		t.Fatalf("%d pad cells in a clipped view", n)
@@ -146,8 +164,8 @@ func TestLayoutClipsAtTheAreaEdge(t *testing.T) {
 	if r := l.Panes["p2"]; r.W != 0 || r.H != 0 {
 		t.Fatalf("p2 outside the area = %+v, want empty", r)
 	}
-	if l.Divider.W != 0 || l.Divider.H != 0 {
-		t.Fatalf("divider outside the area = %+v, want empty", l.Divider)
+	if len(l.Dividers) != 0 {
+		t.Fatalf("dividers outside the area = %+v, want none", l.Dividers)
 	}
 	partition(t, l, screen.Rect{W: 12, H: 6})
 
@@ -177,7 +195,7 @@ func TestLayoutLeavesPadForASmallerSession(t *testing.T) {
 	two := twoPanes(t, proto.SplitRight, 5, 3, 4, 3)
 	area = screen.Rect{W: 16, H: 5}
 	l = two.Layout(area)
-	wantRect(t, "divider", l.Divider, screen.Rect{X: 5, Y: 0, W: 1, H: 3})
+	wantDivider(t, l, screen.Rect{X: 5, Y: 0, W: 1, H: 3})
 	if n := partition(t, l, area); n != 16*5-(5*3+1*3+4*3) {
 		t.Fatalf("%d pad cells, want %d", n, 16*5-(5*3+1*3+4*3))
 	}
@@ -333,5 +351,46 @@ func TestRetabStartsEveryPaneAtSequenceOne(t *testing.T) {
 	s.Retab(proto.Tab{ID: "t9", Panes: []string{"p1"}, Split: ""})
 	if err := s.Apply(partial("p1", 2, 4, 3, proto.Line{Y: 0, S: "x"})); err != nil {
 		t.Fatalf("Retab after Reset restarted p1: %v", err)
+	}
+}
+
+func TestLayoutPlacesANestedTree(t *testing.T) {
+	// p1 | (p2 / p3), frames 9x5 | 10x2 and 10x2.
+	var s Set
+	panes := []string{"p1", "p2", "p3"}
+	s.Reset(proto.ViewOK{Session: "s1", Tab: "t1", Panes: panes})
+	s.Retab(proto.Tab{ID: "t1", Session: "s1", Index: 1, Panes: panes, Split: proto.SplitRight, Focused: "p3",
+		Layout: proto.Node{Split: proto.SplitRight, Nodes: []proto.Node{
+			{Pane: "p1"},
+			{Split: proto.SplitDown, Nodes: []proto.Node{{Pane: "p2"}, {Pane: "p3"}}},
+		}}})
+	for _, f := range []proto.Frame{full("p1", 1, 9, 5, "a"), full("p2", 1, 10, 2, "b"), full("p3", 1, 10, 2, "c")} {
+		if err := s.Apply(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	area := screen.Rect{W: 20, H: 5}
+	l := s.Layout(area)
+	wantRect(t, "p1", l.Panes["p1"], screen.Rect{X: 0, Y: 0, W: 9, H: 5})
+	wantRect(t, "p2", l.Panes["p2"], screen.Rect{X: 10, Y: 0, W: 10, H: 2})
+	wantRect(t, "p3", l.Panes["p3"], screen.Rect{X: 10, Y: 3, W: 10, H: 2})
+	want := []Divider{
+		{Rect: screen.Rect{X: 10, Y: 2, W: 10, H: 1}},
+		{Rect: screen.Rect{X: 9, Y: 0, W: 1, H: 5}, Vertical: true},
+	}
+	if len(l.Dividers) != 2 || l.Dividers[0] != want[0] || l.Dividers[1] != want[1] {
+		t.Fatalf("dividers = %+v, want %+v", l.Dividers, want)
+	}
+	if n := partition(t, l, area); n != 0 {
+		t.Fatalf("%d pad cells, want none", n)
+	}
+
+	// A layout that does not name the tab's panes is read as one row.
+	s.Retab(proto.Tab{ID: "t1", Session: "s1", Index: 1, Panes: panes, Split: proto.SplitDown,
+		Layout: proto.Node{Split: proto.SplitRight, Nodes: []proto.Node{{Pane: "p1"}, {Pane: "p9"}}}})
+	l = s.Layout(screen.Rect{W: 20, H: 12})
+	wantRect(t, "p3 stacked", l.Panes["p3"], screen.Rect{X: 0, Y: 9, W: 10, H: 2})
+	if len(l.Dividers) != 2 || l.Dividers[0].Vertical {
+		t.Fatalf("dividers of the row = %+v", l.Dividers)
 	}
 }

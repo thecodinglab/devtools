@@ -63,7 +63,7 @@ pc1() {
 	note "$STATUS"
 	gen=$(field "$STATUS" gen) sessions=$(field "$STATUS" sessions) clients=$(field "$STATUS" clients)
 	bad=
-	[ "$gen" = 1 ] || bad="gen is ${gen:-missing}, want 1"
+	[ "$gen" = 2 ] || bad="gen is ${gen:-missing}, want 2"
 	# sessions is 0 right after the switch (CO7). Once a client has attached
 	# (CO8) or the check runs in a devtools pane, sessions exist and are not
 	# counted.
@@ -188,11 +188,11 @@ pc9() {
 	first=$(head -c 64 "$WORK/bridge")
 	note "first bytes: $first"
 	case $first in
-	'devtools-bridge-ready 1'*) check PC-9 pass "the bridge is reachable" ;;
+	'devtools-bridge-ready 2'*) check PC-9 pass "the bridge is reachable" ;;
 	*)
 		note_output <"$WORK/bridge.err"
 		if [ "$rc" -eq 255 ]; then check PC-9 skip "ssh to localhost is not set up (X1 covers the bridge from another machine)"; else
-			check PC-9 FAIL "the bridge did not start with devtools-bridge-ready 1 (exit $rc)"
+			check PC-9 FAIL "the bridge did not start with devtools-bridge-ready 2 (exit $rc)"
 		fi
 		;;
 	esac
@@ -310,7 +310,7 @@ Environment=DEVTOOLS_PASS_ENV=LANG,SHELL
 Environment=LANG=en_US.UTF-8
 Environment=SHELL=$prof/bin/zsh
 ExecStart=$prof/bin/devtools server"
-	fx devtools 'server status --json' "{\"pid\":4242,\"version\":\"1.0.0\",\"gen\":1,\"boot\":\"b1\",\"sessions\":0,\"panes\":0,\"clients\":0,\"socket\":\"$state/server.sock\"}"
+	fx devtools 'server status --json' "{\"pid\":4242,\"version\":\"1.0.0\",\"gen\":2,\"boot\":\"b1\",\"sessions\":0,\"panes\":0,\"clients\":0,\"socket\":\"$state/server.sock\"}"
 	fx devtools list 'devtools /tmp/dev/devtools'
 	fx devtools 'bookmark list' 'notes	/tmp'
 	fx devtools sessions "$MISMATCH
@@ -325,7 +325,7 @@ Unset it, or detach from devtools first." 1
 	fx pgrep '-x herdr' '' 1
 	fx ss -lntu 'tcp LISTEN 0 128 127.0.0.1:22 0.0.0.0:*'
 	fx lsof '-nP -i :47390' '' 1
-	fx ssh '-T -o BatchMode=yes -o ConnectTimeout=10 localhost devtools bridge' 'devtools-bridge-ready 1'
+	fx ssh '-T -o BatchMode=yes -o ConnectTimeout=10 localhost devtools bridge' 'devtools-bridge-ready 2'
 	fx nvim "--headless -c lua io.write(tostring(vim.env.DEVTOOLS_PANE ~= nil)) -c q" true
 	fx zsh '-ic tmux new -d' "$REFUSAL; a multiplexer inside it would nest." 1
 	fx tmux 'list-sessions -F #{session_name}' main

@@ -33,6 +33,7 @@ const (
 	TypeTabClose     = "tab.close"
 	TypePaneSplit    = "pane.split"
 	TypePaneFocus    = "pane.focus"
+	TypePaneResize   = "pane.resize"
 	TypePaneClose    = "pane.close"
 	TypePaneText     = "pane.text"
 	TypePaneScroll   = "pane.scroll"
@@ -113,6 +114,7 @@ func init() {
 		func() Typed { return &TabClose{} },
 		func() Typed { return &PaneSplit{} },
 		func() Typed { return &PaneFocus{} },
+		func() Typed { return &PaneResize{} },
 		func() Typed { return &PaneClose{} },
 		func() Typed { return &PaneText{} },
 		func() Typed { return &PaneScroll{} },
@@ -390,6 +392,22 @@ type PaneFocusResult struct {
 	Pane  string `json:"pane"`
 }
 
+// PaneResize moves a border of the pane by Cells (at least 1) in
+// Direction ("left", "right", "up", "down"): the border on that side of
+// the pane when it has a neighbour there, which grows the pane, else the
+// border on the other side, which shrinks it. Each side keeps its minimum,
+// so the border may move less than asked, or not at all.
+type PaneResize struct {
+	Pane      string `json:"pane"`
+	Direction string `json:"direction"`
+	Cells     int    `json:"cells"`
+}
+
+// PaneResizeResult is the ok of pane.resize: whether a border moved.
+type PaneResizeResult struct {
+	Moved bool `json:"moved"`
+}
+
 // PaneClose closes a pane.
 type PaneClose struct {
 	Pane string `json:"pane"`
@@ -440,6 +458,7 @@ func (TabSelect) Type() string    { return TypeTabSelect }
 func (TabClose) Type() string     { return TypeTabClose }
 func (PaneSplit) Type() string    { return TypePaneSplit }
 func (PaneFocus) Type() string    { return TypePaneFocus }
+func (PaneResize) Type() string   { return TypePaneResize }
 func (PaneClose) Type() string    { return TypePaneClose }
 func (PaneText) Type() string     { return TypePaneText }
 func (PaneScroll) Type() string   { return TypePaneScroll }

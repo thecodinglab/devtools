@@ -7,11 +7,13 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"devtools/internal/platform"
+	"devtools/internal/proto"
 	"devtools/internal/ui"
 )
 
@@ -176,4 +178,66 @@ func TestHubFirstLocalRow(t *testing.T) {
 		closeHub(t, x)
 		return took
 	})
+}
+
+// A tab of three panes: split right, then the right pane split down; the
+// bottom right pane grows to the left twice, the second time without the
+// prefix (the repeat), and the server restores the grid with its sizes.
+func TestAGridOfPanesResizesAndSurvivesARestart(t *testing.T) {
+	m := StartMachine(t, "desktop")
+	project(t, m, "alpha")
+	x := openSession(t, m, plain(m, 80, 24), "alpha")
+	tabOf := func() proto.Tab {
+		s := snapshot(t, m)
+		ss, _ := sessionOf(s, "alpha")
+		for _, tb := range s.Tabs {
+			if tb.ID == ss.Current {
+				return tb
+			}
+		}
+		return proto.Tab{}
+	}
+	x.Key("prefix+%")
+	eventually(t, 10*time.Second, "two panes", func() bool { return len(tabOf().Panes) == 2 })
+	x.Key("prefix+-")
+	eventually(t, 10*time.Second, "three panes", func() bool { return len(tabOf().Panes) == 3 })
+	// 80 columns: 40, the divider, 39; 23 rows on the right: 11, the
+	// divider, 11
+	dividerAt := func(rows []string) int {
+		if len(rows) == 0 {
+			return -1
+		}
+		return strings.Index(string([]rune(rows[0])), glyph(ui.GlyphDividerV))
+	}
+	runeCol := func(rows []string) int {
+		i := dividerAt(rows)
+		if i < 0 {
+			return -1
+		}
+		return len([]rune(rows[0][:i]))
+	}
+	waitUntil(t, x, 10*time.Second, "a grid of three panes", func(rows []string) bool {
+		return runeCol(rows) == 40 && strings.Contains(strings.Join(rows, "\n"), glyph(ui.GlyphDividerH))
+	})
+
+	x.Key("prefix+H")
+	x.Key("H")
+	waitUntil(t, x, 10*time.Second, "the right panes 10 columns wider", func(rows []string) bool { return runeCol(rows) == 30 })
+	before := tabOf()
+	if l := before.Layout; l.Split != proto.SplitRight || len(l.Nodes) != 2 || l.Nodes[1].Split != proto.SplitDown {
+		t.Fatalf("layout %+v, want p1 | (p2 / p3)", l)
+	}
+
+	// After the repeat time H is the pane's again.
+	time.Sleep(1500 * time.Millisecond)
+	x.Type("echo H-is-typed\r")
+	waitText(t, x, 10*time.Second, "H-is-typed")
+
+	m.Stop()
+	m.Start()
+	waitText(t, x, 20*time.Second, ui.Notice("restarted", m.Welcome().Host))
+	if after := tabOf(); !reflect.DeepEqual(after.Layout, before.Layout) {
+		t.Fatalf("the layout after the restart\n%+v\nwant\n%+v", after.Layout, before.Layout)
+	}
+	waitUntil(t, x, 10*time.Second, "the grid is shown again", func(rows []string) bool { return runeCol(rows) == 30 })
 }
