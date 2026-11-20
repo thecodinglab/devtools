@@ -70,7 +70,9 @@ func isDir(path string) bool {
 //     the first); current is one of the session's tabs (else the first);
 //   - the size is clamped to the limits of 4.1, a size of zero is the
 //     default 120 by 40; the label is sanitised; a pane without a directory
-//     starts in the session directory;
+//     starts in the session directory; a resume whose kind or id is empty,
+//     longer than MaxResume or holds anything but ASCII letters, digits,
+//     "-", "_" and "." is dropped;
 //   - each counter is at least the largest id of its kind in the file,
 //     dropped objects included.
 //
@@ -122,6 +124,7 @@ func Repair(s State) State {
 				if p.Cwd == "" {
 					p.Cwd = sess.Dir
 				}
+				p.Resume = repairResume(p.Resume)
 				panes = append(panes, p)
 			}
 			if len(panes) == 0 {
@@ -198,4 +201,27 @@ func idNumber(id string) uint64 {
 		return 0
 	}
 	return n
+}
+
+// repairResume returns a copy of r when its kind and id have the form of
+// Repair, else nil.
+func repairResume(r *Resume) *Resume {
+	if r == nil || !resumeToken(r.Kind) || !resumeToken(r.ID) {
+		return nil
+	}
+	c := *r
+	return &c
+}
+
+func resumeToken(s string) bool {
+	if s == "" || len(s) > MaxResume {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
 }

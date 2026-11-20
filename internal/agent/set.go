@@ -72,6 +72,14 @@ func (s *Set) Tick() (changes []Change, next time.Time) {
 	return changes, next
 }
 
+// Kind is the kind of agent the pane runs, "" when it runs none.
+func (s *Set) Kind(pane string) Kind {
+	if t, ok := s.panes[pane]; ok {
+		return t.kind
+	}
+	return ""
+}
+
 // All is the state of every pane that is an agent, by pane id.
 func (s *Set) All() map[string]State {
 	all := make(map[string]State)

@@ -16,16 +16,22 @@ import (
 // changed marks the state unsaved when changes touch what state.json holds:
 // anything but agent records (3.9).
 func (c *core) changed(changes []proto.Change) {
+	for _, ch := range changes {
+		if ch.Kind != proto.KindAgent {
+			c.unsaved()
+			return
+		}
+	}
+}
+
+// unsaved marks the state unsaved and schedules its save: a change of the
+// wire state (changed) or of what only state.json holds (SetResume).
+func (c *core) unsaved() {
 	if c.s.o.StateDir == "" {
 		return
 	}
-	for _, ch := range changes {
-		if ch.Kind != proto.KindAgent {
-			c.saveDirty = true
-			break
-		}
-	}
-	if c.saveDirty && !c.saveArmed {
+	c.saveDirty = true
+	if !c.saveArmed {
 		c.saveArmed = true
 		c.after(c.s.o.SaveDelay, func(c *core) {
 			c.saveArmed = false

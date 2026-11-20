@@ -1,8 +1,9 @@
 // Package persist is state.json, the structure of a server that survives a
 // restart (3.9 of the plan): the id counters, and per session its id,
 // directory, label, current tab, last-shown time and size, and per tab its
-// layout, its focused pane and each pane's id and directory. Screen contents,
-// history, titles, agent state and anything per client are not saved.
+// layout, its focused pane and each pane's id, directory and the agent
+// conversation its shell resumes (Resume). Screen contents, history, titles,
+// agent state and anything per client are not saved.
 //
 // Save writes atomically: a temp file in the same directory, fsynced,
 // renamed over the old file, the directory fsynced; the file has mode 0600.
@@ -76,11 +77,26 @@ type Tab struct {
 	Layout  *proto.Node `json:"layout,omitempty"`
 }
 
-// Pane is one pane: its id and its last known directory.
+// Pane is one pane: its id, its last known directory and, while it runs an
+// agent that can be resumed, that agent's conversation.
 type Pane struct {
-	ID  string `json:"id"`
-	Cwd string `json:"cwd"`
+	ID     string  `json:"id"`
+	Cwd    string  `json:"cwd"`
+	Resume *Resume `json:"resume,omitempty"`
 }
+
+// Resume is the conversation of the agent a pane ran: its kind ("claude")
+// and the agent's id of the conversation. When the pane starts again its
+// shell resumes it (internal/agent/resume). This package checks the form
+// only; whether the kind can be resumed and the id is one of its ids is
+// for the server to check.
+type Resume struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+// MaxResume is the longest kind or id of a Resume.
+const MaxResume = 128
 
 // SetAside is the error of Load when the file did not parse or had an
 // unknown version. The file was renamed to Bad and the State Load returned

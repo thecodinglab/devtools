@@ -64,6 +64,8 @@ type crossState struct {
 	agents  *agent.Set
 	timer   uint64    // the number of the armed timer of agents
 	timerAt time.Time // when it fires; zero when none is armed
+
+	resumes map[string]*resumeWatch // per agent pane, what is known of its conversation (resume.go)
 }
 
 // crossStates holds the state of every server of the process, by its Core.
@@ -81,7 +83,7 @@ func stateOf(core Core) *crossState {
 	}
 	st := crossStates.m[core]
 	if st == nil {
-		st = &crossState{watches: map[Conn]*catalogStream{}, agents: agent.NewSet(agentClock)}
+		st = &crossState{watches: map[Conn]*catalogStream{}, agents: agent.NewSet(agentClock), resumes: map[string]*resumeWatch{}}
 		crossStates.m[core] = st
 	}
 	return st
@@ -401,10 +403,11 @@ func (agentObserver) Report(core Core, pane string, r vt.AgentReport) {
 func (agentObserver) Foreground(core Core, pane string, group []platform.Proc) {
 	procs := make([]agent.Proc, len(group))
 	for i, p := range group {
-		procs[i] = agent.Proc{Name: p.Name, Args: p.Args}
+		procs[i] = agent.Proc{Pid: p.Pid, Name: p.Name, Args: p.Args}
 	}
 	st := stateOf(core)
 	st.agentChanges(core, st.agents.Procs(pane, procs))
+	st.lookUpConversation(core, pane, procs)
 }
 
 func (agentObserver) Seen(core Core, pane string) {
@@ -414,6 +417,7 @@ func (agentObserver) Seen(core Core, pane string) {
 
 func (agentObserver) Gone(core Core, pane string) {
 	st := stateOf(core)
+	delete(st.resumes, pane)
 	st.agentChanges(core, st.agents.Gone(pane))
 }
 
@@ -449,7 +453,8 @@ func (st *crossState) arm(core Core, next time.Time) {
 }
 
 // apply writes the changes into the state: PutAgent for an agent, DelAgent
-// for a pane that is no longer one; a transition into blocked or done is
+// for a pane that is no longer one (whose conversation is not resumed any
+// more); a transition into blocked or done is
 // also sent as event.agent to every interactive connection that claims
 // agents.
 func (st *crossState) apply(core Core, changes []agent.Change) {
@@ -460,6 +465,7 @@ func (st *crossState) apply(core Core, changes []agent.Change) {
 	for _, ch := range changes {
 		if ch.State.Kind == "" {
 			core.DelAgent(ch.Pane)
+			st.forgetConversation(core, ch.Pane)
 			continue
 		}
 		p, ok := state.Panes[ch.Pane]

@@ -8,6 +8,7 @@ import (
 	"devtools/internal/platform"
 	"devtools/internal/proto"
 	"devtools/internal/server/model"
+	"devtools/internal/server/persist"
 	"devtools/internal/session"
 	"devtools/internal/vt"
 )
@@ -226,7 +227,10 @@ func (c *core) spawn(e model.Effect) {
 		KillGrace: o.KillGrace,
 		SyncHold:  o.SyncHold,
 	}
-	po.Argv, po.Arg0 = c.program()
+	po.Argv, po.Arg0 = c.shell()
+	if e.Resume != nil {
+		c.startResumed(&po, e)
+	}
 	c.gen++
 	s, id, gen := c.s, e.Pane, c.gen
 	po.Notify = func(ev pane.Event) {
@@ -243,10 +247,10 @@ func (c *core) spawn(e model.Effect) {
 	h.swap(p)
 }
 
-// program is the program of a new pane: Options.Shell, or $SHELL of the
+// shell is the shell of a new pane: Options.Shell, or $SHELL of the
 // server's environment as a login shell (argv[0] is "-" and its base name,
 // 3.2.1).
-func (c *core) program() (argv []string, arg0 string) {
+func (c *core) shell() (argv []string, arg0 string) {
 	if len(c.s.o.Shell) > 0 {
 		return append([]string(nil), c.s.o.Shell...), ""
 	}
@@ -361,6 +365,16 @@ func (c *core) PutAgent(paneID string, a proto.Agent) {
 
 func (c *core) DelAgent(paneID string) {
 	c.apply(c.model.DelAgent(paneID), false)
+}
+
+func (c *core) SetResume(paneID, kind, id string) {
+	var r *persist.Resume
+	if id != "" {
+		r = &persist.Resume{Kind: kind, ID: id}
+	}
+	if c.model.SetResume(paneID, r) {
+		c.unsaved()
+	}
 }
 
 func (c *core) After(d time.Duration, f func(Core)) {

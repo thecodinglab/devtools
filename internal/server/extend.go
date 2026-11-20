@@ -38,6 +38,10 @@ type Core interface {
 	CloseSession(session string) (closed bool)
 	PutAgent(pane string, a proto.Agent) // goes into the state and the next delta
 	DelAgent(pane string)
+	// SetResume records the agent conversation (kind, id) the pane's shell
+	// resumes when the pane starts after a restart; id "" clears it. It goes
+	// into state.json, not into the state of the wire.
+	SetResume(pane, kind, id string)
 	After(d time.Duration, f func(Core)) // a timer on the loop
 	Post(f func(Core))                   // from any goroutine
 }

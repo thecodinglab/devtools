@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	"devtools/internal/proto"
+	"devtools/internal/server/persist"
 	"devtools/internal/session"
 )
 
@@ -150,7 +151,11 @@ func (s *State) reconcile(b *batch, x *sess) {
 }
 
 // spawn marks p running at r and asks for its program. It starts in the
-// pane's directory, or in the session directory when that is gone.
+// pane's directory, or in the session directory when that is gone, and
+// resumes the agent conversation of the pane once: the record goes with the
+// effect and is marked handed. It stays in state.json, so a stop before the
+// resumed agent is found again keeps it, until SetResume replaces it or
+// DropHanded drops it.
 func (s *State) spawn(b *batch, x *sess, p *pane, r Rect) {
 	p.State = proto.PaneRunning
 	p.Exit = nil
@@ -160,7 +165,12 @@ func (s *State) spawn(b *batch, x *sess, p *pane, r Rect) {
 		dir = x.Dir
 	}
 	b.touch(p.ID)
-	b.effect(Effect{Kind: Spawn, Session: x.ID, Pane: p.ID, Cols: r.W, Rows: r.H, Dir: dir})
+	e := Effect{Kind: Spawn, Session: x.ID, Pane: p.ID, Cols: r.W, Rows: r.H, Dir: dir}
+	if p.resume != nil && !p.handed {
+		c := *p.resume
+		e.Resume, p.handed = &c, true
+	}
+	b.effect(e)
 }
 
 // rectOf returns the rectangle of a pane in its tab's layout.
@@ -568,4 +578,53 @@ func (s *State) DelAgent(pane string) Result {
 	delete(s.agents, pane)
 	b.goneAgent(pane)
 	return b.result()
+}
+
+// SetResume sets the agent conversation the pane's shell resumes when the
+// pane starts next (3.9); nil clears it. It is what the running agent holds,
+// so the next start resumes it even when the same record was handed to a
+// start before. The record is in state.json only, not in the state of the
+// wire, so there is no Result: changed says whether what state.json holds
+// changed. A pane that does not exist changes nothing.
+func (s *State) SetResume(pane string, r *persist.Resume) (changed bool) {
+	p, ok := s.panes[pane]
+	if !ok {
+		return false
+	}
+	p.handed = false
+	if r != nil {
+		c := *r
+		r = &c
+	}
+	switch {
+	case p.resume == nil && r == nil:
+		return false
+	case p.resume != nil && r != nil && *p.resume == *r:
+		return false
+	}
+	p.resume = r
+	return true
+}
+
+// Resume returns the agent conversation the pane's next start resumes, nil
+// for none.
+func (s *State) Resume(pane string) *persist.Resume {
+	p, ok := s.panes[pane]
+	if !ok || p.resume == nil {
+		return nil
+	}
+	c := *p.resume
+	return &c
+}
+
+// DropHanded clears the pane's record when it is r and was handed to a
+// start, and nothing replaced it since: the resumed agent was not found
+// again. changed is as for SetResume.
+func (s *State) DropHanded(pane string, r persist.Resume) (changed bool) {
+	p, ok := s.panes[pane]
+	if !ok || !p.handed || p.resume == nil || *p.resume != r {
+		return false
+	}
+	p.resume, p.handed = nil, false
+	return true
 }

@@ -27,8 +27,11 @@ const (
 	Unknown Status = "unknown"
 )
 
-// Proc is one process of a pane's foreground group.
+// Proc is one process of a pane's foreground group. Pid is 0 when it is not
+// known; the trackers do not read it, the lookup of an agent's conversation
+// (internal/agent/resume) does.
 type Proc struct {
+	Pid  int
 	Name string
 	Args []string
 }

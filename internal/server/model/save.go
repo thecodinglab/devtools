@@ -6,7 +6,8 @@ import (
 )
 
 // Load builds the state of a restored server (3.9). Every pane is dormant
-// and no session is displayed, so nothing is spawned until a view is set;
+// (keeping the agent conversation its first start resumes) and no session
+// is displayed, so nothing is spawned until a view is set;
 // p is repaired first (persist.Repair), so the invariants of 3.3 hold
 // whatever the file said. The counters continue where p left them.
 func Load(p persist.State) *State {
@@ -21,7 +22,7 @@ func Load(p persist.State) *State {
 		for i, pt := range ps.Tabs {
 			t := &proto.Tab{ID: pt.ID, Session: ps.ID, Index: i + 1, Split: pt.Split, Focused: pt.Focused, Layout: pt.Layout.Clone()}
 			for _, pp := range pt.Panes {
-				s.panes[pp.ID] = &pane{Pane: proto.Pane{ID: pp.ID, Tab: pt.ID, Session: ps.ID, State: proto.PaneDormant, Cwd: pp.Cwd}}
+				s.panes[pp.ID] = &pane{Pane: proto.Pane{ID: pp.ID, Tab: pt.ID, Session: ps.ID, State: proto.PaneDormant, Cwd: pp.Cwd}, resume: pp.Resume}
 				t.Panes = append(t.Panes, pp.ID)
 			}
 			s.tabs[pt.ID] = t
@@ -36,7 +37,8 @@ func Load(p persist.State) *State {
 // Save returns the structure of the state for state.json: the counters,
 // and per session its directory, label, current tab, last-shown time, size
 // and tabs in index order with their layout, focused pane and each pane's id
-// and directory. Pane states, titles, programs and agents are not saved.
+// directory and the agent conversation its next start resumes. Pane states,
+// titles, programs and agent records are not saved.
 func (s *State) Save() persist.State {
 	out := persist.State{Version: persist.Version, Counters: s.next, Sessions: []persist.Session{}}
 	for _, sid := range sortedIDs(s.sessions) {
@@ -47,7 +49,7 @@ func (s *State) Save() persist.State {
 			tree := t.Layout.Clone()
 			pt := persist.Tab{ID: t.ID, Split: t.Split, Focused: t.Focused, Layout: &tree}
 			for _, pid := range t.Panes {
-				pt.Panes = append(pt.Panes, persist.Pane{ID: pid, Cwd: s.panes[pid].Cwd})
+				pt.Panes = append(pt.Panes, persist.Pane{ID: pid, Cwd: s.panes[pid].Cwd, Resume: s.Resume(pid)})
 			}
 			ps.Tabs = append(ps.Tabs, pt)
 		}

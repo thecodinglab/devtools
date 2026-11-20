@@ -49,10 +49,13 @@ type sess struct {
 	displayed  bool // Display was called since the session was opened or restored
 }
 
-// pane is a pane with the size its program runs at.
+// pane is a pane with the size its program runs at and the agent
+// conversation its next start resumes, which only state.json carries.
 type pane struct {
 	proto.Pane
-	cols, rows int // the size of the last Spawn or Resize; 0 while dormant
+	cols, rows int             // the size of the last Spawn or Resize; 0 while dormant
+	resume     *persist.Resume // nil: the next start is a plain shell
+	handed     bool            // resume went to a Spawn already; it stays saved until SetResume or DropHanded
 }
 
 // Result is the outcome of one operation.
@@ -89,7 +92,7 @@ func (k EffectKind) String() string {
 }
 
 // Effect is one thing the server carries out. Spawn has Session, Pane,
-// Cols, Rows and Dir; Resize has Session, Pane, Cols and Rows; Kill has
+// Cols, Rows and Dir, and Resume when the start resumes an agent; Resize has Session, Pane, Cols and Rows; Kill has
 // Session and Pane and is given for every pane that goes and is not
 // dormant (a running pane's program is closed, an exited pane's terminal
 // is released); Retab has Session; Ended has Session and Dir (the fields
@@ -102,6 +105,7 @@ type Effect struct {
 	Session, Pane string
 	Cols, Rows    int
 	Dir           string
+	Resume        *persist.Resume // Spawn: the agent conversation the shell resumes, nil for none
 }
 
 // Error is the error of an operation; Code is one of 4.1 (proto.Code*).

@@ -12,10 +12,10 @@ import (
 // The process scan (3.2.1). Each running pane's foreground process group is
 // read once per ProcInterval, the focused pane of a displayed tab's every
 // FgInterval (Pane.Info, one ioctl). A pane is busy while its foreground
-// group is not its shell's. While any pane is busy the server reads the
-// process table once per ProcInterval for all panes, on a goroutine of its
-// own, and once at once whenever a pane's foreground group changed. The scan
-// sets the pane's program (the group leader's name) and editor (some
+// group is not its shell's. While any pane is busy, or still an agent
+// (scanDue), the server reads the process table once per ProcInterval for
+// all panes, on a goroutine of its own, and once at once whenever a pane's
+// foreground group changed. The scan sets the pane's program (the group leader's name) and editor (some
 // process of the group is vim, neovim or fzf), and hands each pane's group
 // to the observer, at most once per ProcInterval per pane.
 
@@ -93,7 +93,7 @@ func (c *core) tick(now time.Time) {
 			c.foreground(id, ref, ref.p.Info())
 		}
 	}
-	if c.anyBusy() && now.Sub(c.lastScan) >= c.s.o.ProcInterval {
+	if c.scanDue() && now.Sub(c.lastScan) >= c.s.o.ProcInterval {
 		c.scanNow()
 	}
 }
@@ -118,10 +118,19 @@ func (c *core) foreground(id string, ref paneRef, info pane.Info) {
 	c.scanNow()
 }
 
-// anyBusy reports whether a pane's foreground group is not its shell's.
-func (c *core) anyBusy() bool {
+// scanDue reports whether the periodic scan runs: while a running pane's
+// foreground group is not its shell's, or a running pane is still an agent.
+// The second keeps the polls coming after an agent hands the foreground
+// back to the shell, until the tracker has seen it gone (3.6.1 counts the
+// polls without it): else the pane would stay an agent, and its
+// conversation would be resumed after a restart (resume.go).
+func (c *core) scanDue() bool {
 	for id := range c.panes {
-		if p, ok := c.known.Panes[id]; ok && p.Busy && p.State == proto.PaneRunning {
+		p, ok := c.known.Panes[id]
+		if !ok || p.State != proto.PaneRunning {
+			continue
+		}
+		if _, agent := c.known.Agents[id]; p.Busy || agent {
 			return true
 		}
 	}
@@ -167,7 +176,10 @@ func (c *core) scanned(procs []platform.Proc, err error) {
 				}
 				p.Busy, p.Editor = busy, editor
 			}), false)
-			if c.observer != nil && len(group) > 0 && now.Sub(c.lastObserved[id]) >= c.s.o.ProcInterval {
+			// An empty group is handed over only for an agent: its polls without
+			// the agent end it, also when its group can no longer be read.
+			_, isAgent := c.known.Agents[id]
+			if c.observer != nil && (len(group) > 0 || isAgent) && now.Sub(c.lastObserved[id]) >= c.s.o.ProcInterval {
 				c.lastObserved[id] = now
 				c.observer.Foreground(c, id, group)
 			}

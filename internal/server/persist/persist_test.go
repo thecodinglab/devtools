@@ -480,3 +480,67 @@ func TestAFileOfVersionOneIsRead(t *testing.T) {
 	}
 	wantSetAside(t, path, `{"version":3,"sessions":[]}`)
 }
+
+func TestAResumeSurvivesSaveAndLoad(t *testing.T) {
+	d := dir(t, "p")
+	st := sample(d)
+	want := persist.Resume{Kind: "claude", ID: "2ef64223-3735-4270-b86b-9f035f7e32e0"}
+	st.Sessions[0].Tabs[0].Panes[1].Resume = &want
+	path := filepath.Join(dir(t, "state"), persist.FileName)
+	if err := persist.Save(path, st); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), `"resume"`); n != 1 {
+		t.Fatalf("state.json has %d resume records, want the one: %s", n, b)
+	}
+	got, err := persist.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	panes := got.Sessions[0].Tabs[0].Panes
+	if r := panes[1].Resume; r == nil || *r != want {
+		t.Fatalf("the resume read back is %+v, want %+v", r, want)
+	}
+	if panes[0].Resume != nil || panes[2].Resume != nil {
+		t.Fatalf("panes without a record got one: %+v", panes)
+	}
+}
+
+func TestRepairDropsAMalformedResume(t *testing.T) {
+	d := dir(t, "p")
+	for name, c := range map[string]struct {
+		r    persist.Resume
+		kept bool
+	}{
+		"a uuid":       {persist.Resume{Kind: "claude", ID: "2ef64223-3735-4270-b86b-9f035f7e32e0"}, true},
+		"a name":       {persist.Resume{Kind: "codex", ID: "my_session.2"}, true},
+		"no kind":      {persist.Resume{ID: "x"}, false},
+		"no id":        {persist.Resume{Kind: "claude"}, false},
+		"a space":      {persist.Resume{Kind: "claude", ID: "a b"}, false},
+		"a quote":      {persist.Resume{Kind: "claude", ID: "a'b"}, false},
+		"a semicolon":  {persist.Resume{Kind: "claude", ID: "a;rm"}, false},
+		"a newline":    {persist.Resume{Kind: "claude", ID: "a\nb"}, false},
+		"not ascii":    {persist.Resume{Kind: "claude", ID: "café"}, false},
+		"kind too odd": {persist.Resume{Kind: "cl/aude", ID: "x"}, false},
+		"too long":     {persist.Resume{Kind: "claude", ID: strings.Repeat("a", persist.MaxResume+1)}, false},
+		"just long":    {persist.Resume{Kind: "claude", ID: strings.Repeat("a", persist.MaxResume)}, true},
+	} {
+		st := sample(d)
+		r := c.r
+		st.Sessions[0].Tabs[0].Panes[0].Resume = &r
+		got := persist.Repair(st).Sessions[0].Tabs[0].Panes[0].Resume
+		switch {
+		case c.kept && (got == nil || *got != c.r):
+			t.Errorf("%s: repaired to %+v, want it kept", name, got)
+		case !c.kept && got != nil:
+			t.Errorf("%s: kept %+v", name, got)
+		}
+		if c.kept && got == &r {
+			t.Errorf("%s: Repair shares the record of its input", name)
+		}
+	}
+}

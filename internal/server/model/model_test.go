@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"devtools/internal/proto"
+	"devtools/internal/server/persist"
 )
 
 // TestMain keeps the tests hermetic: nothing of the developer's environment
@@ -994,5 +995,133 @@ func TestClosingANestedPaneGivesItsSpaceToItsNeighbour(t *testing.T) {
 	}
 	if err := checkInvariants(s); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestARestoredResumeGoesWithOneSpawnAndStaysSaved(t *testing.T) {
+	want := persist.Resume{Kind: "claude", ID: "2ef64223-3735-4270-b86b-9f035f7e32e0"}
+	r := want
+	s := Load(persist.State{
+		Version:  persist.Version,
+		Counters: persist.Counters{Session: 1, Tab: 1, Pane: 2},
+		Sessions: []persist.Session{{ID: "s1", Dir: "/d", Current: "t1", Tabs: []persist.Tab{{
+			ID: "t1", Split: "right", Focused: "p1",
+			Panes: []persist.Pane{{ID: "p1", Cwd: "/d", Resume: &r}, {ID: "p2", Cwd: "/d"}},
+		}}}},
+	})
+	s.now = newModel().now
+	s.exists = newModel().exists
+	saves := func() *persist.Resume { return s.Save().Sessions[0].Tabs[0].Panes[0].Resume }
+	if got := saves(); got == nil || *got != want {
+		t.Fatalf("a dormant pane saves %+v, want %+v", got, want)
+	}
+
+	res := s.Display("s1")
+	var spawned []string
+	for _, e := range res.Effects {
+		if e.Kind != Spawn {
+			continue
+		}
+		spawned = append(spawned, e.Pane)
+		switch e.Pane {
+		case "p1":
+			if e.Resume == nil || *e.Resume != want {
+				t.Fatalf("the spawn of p1 resumes %+v, want %+v", e.Resume, want)
+			}
+		default:
+			if e.Resume != nil {
+				t.Fatalf("the spawn of %s resumes %+v", e.Pane, e.Resume)
+			}
+		}
+	}
+	if len(spawned) != 2 {
+		t.Fatalf("spawned %v", spawned)
+	}
+	// Handed, but still saved: a stop before the agent is found keeps it.
+	if got := saves(); got == nil || *got != want {
+		t.Fatalf("after its spawn p1 saves %+v, want %+v", got, want)
+	}
+	if got := s.Save().Sessions[0].Tabs[0].Panes[1].Resume; got != nil {
+		t.Fatalf("p2 saves %+v", got)
+	}
+
+	// A second start of the pane (Enter on an exited pane) does not resume
+	// what was handed already.
+	s.SetPane("p1", func(p *proto.Pane) { p.State = proto.PaneExited })
+	again := s.SetPane("p1", func(p *proto.Pane) { p.State = proto.PaneRunning })
+	if len(again.Effects) != 1 || again.Effects[0].Kind != Spawn || again.Effects[0].Resume != nil {
+		t.Fatalf("the respawn: %s %+v", effects(again.Effects), again.Effects)
+	}
+
+	// DropHanded drops only the record it was armed for.
+	if s.DropHanded("p1", persist.Resume{Kind: "claude", ID: "other"}) {
+		t.Fatal("DropHanded dropped another record")
+	}
+	if !s.DropHanded("p1", want) || saves() != nil {
+		t.Fatalf("DropHanded kept %+v", saves())
+	}
+	if s.DropHanded("p1", want) {
+		t.Fatal("a second DropHanded changed something")
+	}
+}
+
+func TestAConfirmedRecordIsNotDropped(t *testing.T) {
+	want := persist.Resume{Kind: "claude", ID: "a"}
+	r := want
+	s := Load(persist.State{
+		Version: persist.Version, Counters: persist.Counters{Session: 1, Tab: 1, Pane: 1},
+		Sessions: []persist.Session{{ID: "s1", Dir: "/d", Current: "t1", Tabs: []persist.Tab{{
+			ID: "t1", Focused: "p1", Panes: []persist.Pane{{ID: "p1", Cwd: "/d", Resume: &r}},
+		}}}},
+	})
+	s.now, s.exists = newModel().now, newModel().exists
+	s.Display("s1")
+	// The resumed agent is found holding the same conversation.
+	if s.SetResume("p1", &want) {
+		t.Fatal("the same record changed the file")
+	}
+	if s.DropHanded("p1", want) {
+		t.Fatal("a record the running agent confirmed was dropped")
+	}
+	if got := s.Resume("p1"); got == nil || *got != want {
+		t.Fatalf("p1 resumes %+v", got)
+	}
+}
+
+func TestSetResumeSaysWhetherTheFileChanges(t *testing.T) {
+	s := newModel()
+	sid := open(t, s, "/d")
+	p := s.sessions[sid].Tabs[0]
+	p = s.tabs[p].Panes[0]
+	a := &persist.Resume{Kind: "claude", ID: "a"}
+	b := &persist.Resume{Kind: "claude", ID: "b"}
+	for i, c := range []struct {
+		pane    string
+		r       *persist.Resume
+		changed bool
+	}{
+		{p, a, true},
+		{p, &persist.Resume{Kind: "claude", ID: "a"}, false},
+		{p, b, true},
+		{p, nil, true},
+		{p, nil, false},
+		{"p99", a, false},
+	} {
+		if got := s.SetResume(c.pane, c.r); got != c.changed {
+			t.Fatalf("step %d: changed = %v, want %v", i, got, c.changed)
+		}
+	}
+	s.SetResume(p, a)
+	a.ID = "changed by the caller"
+	if got := s.Resume(p); got == nil || got.ID != "a" {
+		t.Fatalf("the model shares the caller's record: %+v", got)
+	}
+	got := s.Resume(p)
+	got.ID = "changed by the reader"
+	if again := s.Resume(p); again.ID != "a" {
+		t.Fatalf("Resume hands out the model's record: %+v", again)
+	}
+	if r := s.Display(sid); len(r.Effects) != 1 || r.Effects[0].Resume == nil || r.Effects[0].Resume.ID != "a" {
+		t.Fatalf("the spawn does not resume: %s %+v", effects(r.Effects), r.Effects)
 	}
 }

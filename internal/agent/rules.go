@@ -29,6 +29,19 @@ func identify(current Kind, group []Proc) Kind {
 	return ""
 }
 
+// Processes returns the processes of group that the identity table of 3.6.1
+// counts as an agent of kind k, in the order of group. A group can hold more
+// than one: a wrapper and the program it starts, or a child of the agent.
+func Processes(k Kind, group []Proc) []Proc {
+	var out []Proc
+	for _, p := range group {
+		if k != "" && kindOf(p) == k {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // kindOf applies the identity table to one process.
 func kindOf(p Proc) Kind {
 	switch {
