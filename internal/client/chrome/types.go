@@ -26,7 +26,7 @@ type State struct {
 	WindowFocused bool
 	Mode          string // what the keys do: "normal", "prefix", "copy", "scrolled", "confirm", "switching"
 	View          string // what is displayed: "showing", "stale", "none". Independent of Mode: a prefix can be pending and a switch can run in a stale view
-	Hints         bool   // the prefix has been pending for ui.HintDelay, or "?" was pressed after it
+	Hints         bool   // "?" was pressed after the prefix
 	HintPage      int    // how often "?" was pressed in this prefix; the look draws page HintPage modulo the number of pages
 	Session       string // label, sanitised
 	Machine       string // "" local

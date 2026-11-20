@@ -401,8 +401,8 @@ func chunks(s string, n int) []chunk {
 }
 
 // prefixResult follows the prefix in the status row (5a.10.1, C3): the
-// hint strip after ui.HintDelay or at once on "?", the next page with each
-// further "?", and the notice of an unbound key.
+// hint strip on "?" (never by itself), the next page with each further "?",
+// and the notice of an unbound key.
 func (m *Model) prefixResult(r keys.Result) tea.Cmd {
 	var cmds []tea.Cmd
 	if r.Repeat {
@@ -411,13 +411,7 @@ func (m *Model) prefixResult(r keys.Result) tea.Cmd {
 	}
 	was := m.prefix
 	m.prefix = r.Pending
-	switch {
-	case m.prefix && !was:
-		m.prefixGen++
-		m.hints, m.hintPage = false, 0
-		cmds = append(cmds, m.hk.After(ui.HintDelay, hintsDue{gen: m.prefixGen}))
-	case !m.prefix && was:
-		m.prefixGen++
+	if m.prefix != was {
 		m.hints, m.hintPage = false, 0
 	}
 	if r.More {

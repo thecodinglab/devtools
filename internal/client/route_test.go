@@ -286,29 +286,19 @@ func TestDetachEndsTheProgram(t *testing.T) {
 	}
 }
 
-func TestHintsAreSetAfterTheDelayAndClearedWithThePrefix(t *testing.T) {
+func TestHintsNeverComeByThemselves(t *testing.T) {
 	d := showOne(t, client.Options{}, proto.Pane{ID: "p1"})
 	d.Key("ctrl+space")
 	if st := client.ChromeStateOf(d.M); st.Mode != "prefix" || st.Hints {
 		t.Fatalf("at once: mode %q hints %v, want prefix without hints", st.Mode, st.Hints)
 	}
-	d.Advance(ui.HintDelay - time.Millisecond)
-	if client.ChromeStateOf(d.M).Hints {
-		t.Fatal("hints before the delay")
-	}
-	d.Advance(time.Millisecond)
-	if !client.ChromeStateOf(d.M).Hints {
-		t.Fatal("no hints after the delay")
+	d.Advance(time.Minute)
+	if st := client.ChromeStateOf(d.M); st.Mode != "prefix" || st.Hints {
+		t.Fatalf("after a minute: mode %q hints %v, want prefix without hints", st.Mode, st.Hints)
 	}
 	d.Key("esc")
 	if st := client.ChromeStateOf(d.M); st.Mode != "normal" || st.Hints || st.HintPage != 0 {
 		t.Fatalf("after esc: mode %q hints %v page %d", st.Mode, st.Hints, st.HintPage)
-	}
-	// a new prefix starts without hints, and the old timer does nothing
-	d.Key("ctrl+space")
-	d.Advance(ui.HintDelay / 2)
-	if client.ChromeStateOf(d.M).Hints {
-		t.Fatal("hints from the timer of the earlier prefix")
 	}
 }
 

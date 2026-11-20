@@ -23,7 +23,6 @@ import (
 // The timings of 5a.7.3.
 const (
 	Slow       = 150 * time.Millisecond // a loading text or the switching row appears only after this
-	HintDelay  = 600 * time.Millisecond // the prefix has been pending this long: show the hint strip
 	NoticeLife = 8 * time.Second        // a notice leaves by itself
 )
 

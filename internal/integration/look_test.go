@@ -698,17 +698,12 @@ func TestLookPrefixKeepsEveryTabCell(t *testing.T) {
 	}
 }
 
-func TestLookHintStripComesAfter600msAndAtOnceAfterQuestionMark(t *testing.T) {
+func TestLookHintStripComesOnlyAfterQuestionMark(t *testing.T) {
 	win := standard(t)
 	win.Key("ctrl+space")
-	win.Advance(ui.HintDelay - time.Millisecond)
+	win.Advance(time.Minute)
 	if row := win.Screen().Row(23); strings.Contains(row, "esc cancel") {
-		t.Fatalf("hints before %v: %q", ui.HintDelay, row)
-	}
-	win.Advance(time.Millisecond)
-	first := win.Screen().Row(23)
-	if !strings.HasPrefix(first, " prefix   esc cancel   o hub") || !strings.HasSuffix(first, "? more") {
-		t.Fatalf("after %v: %q, want the first page of hints", ui.HintDelay, first)
+		t.Fatalf("hints without ?: %q", row)
 	}
 	win.Key("esc")
 	if row := win.Screen().Row(23); strings.Contains(row, "prefix") {
@@ -716,8 +711,9 @@ func TestLookHintStripComesAfter600msAndAtOnceAfterQuestionMark(t *testing.T) {
 	}
 	win.Key("ctrl+space")
 	win.Key("?")
-	if row := win.Screen().Row(23); row != first {
-		t.Fatalf("after ?: %q, want the first page at once %q", row, first)
+	first := win.Screen().Row(23)
+	if !strings.HasPrefix(first, " prefix   esc cancel   o hub") || !strings.HasSuffix(first, "? more") {
+		t.Fatalf("after ?: %q, want the first page of hints", first)
 	}
 	win.Key("?")
 	if row := win.Screen().Row(23); !strings.HasPrefix(row, " prefix   n next tab") {
