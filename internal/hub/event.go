@@ -10,14 +10,9 @@ import (
 	"devtools/internal/ui"
 )
 
-// Modes of 5.3.8 that today's names in hub.go do not have yet. The wire
-// names are all, open, new and agents (4.2.10). ModeSessions is the second
-// name of today's ModeOpen until P2-09 removes the old one; ModeAgents
-// follows ModeNew in the order of 5.3.8.
-const (
-	ModeSessions      = ModeOpen
-	ModeAgents   Mode = ModeNew + 1
-)
+// ModeAgents follows ModeNew in the order of 5.3.8. The wire names of the
+// modes are all, open, new and agents (4.2.10).
+const ModeAgents Mode = ModeNew + 1
 
 // KindAgent, the kind of Item of 5.3.8 that hub.go does not declare, is a
 // row for one agent pane; it follows KindSession (contract change 18).

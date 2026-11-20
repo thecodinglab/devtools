@@ -597,7 +597,7 @@ func TestSessionsOpensSwitcherOnOpenTmuxSessions(t *testing.T) {
 	if code := Run([]string{"sessions"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("sessions returned %d, stderr=%s", code, stderr.String())
 	}
-	wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeOpen, ""))
+	wantCalls(t, r, fmt.Sprintf("Hub %d %q", hub.ModeSessions, ""))
 }
 
 // Was: the legacy hub opened in mode new. Now: in a plain terminal Enter

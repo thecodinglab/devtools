@@ -288,7 +288,7 @@ func TestSessionsOutsideHerdrStartsServerBeforeListing(t *testing.T) {
 	if !slices.Equal(r.opened, []mux.Backend{mux.Herdr}) || r.ctx.Where != mux.InTerminal {
 		t.Fatalf("opened %v in %+v, want herdr in a plain terminal", r.opened, r.ctx)
 	}
-	wantCalls(t, r, fmt.Sprintf("Enter valid=true hub %d %q", hub.ModeOpen, ""))
+	wantCalls(t, r, fmt.Sprintf("Enter valid=true hub %d %q", hub.ModeSessions, ""))
 	if got := readLog(t, log); got != "" {
 		t.Fatalf("herdr args = %q, want none before the client", got)
 	}

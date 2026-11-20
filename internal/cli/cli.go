@@ -954,7 +954,7 @@ func sessionsCommand(a *app) *cobra.Command {
 		Short: "Open the switcher on the open sessions",
 		Args:  usageNoArgs("usage: devtools sessions"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeOpen}})
+			return a.enter(mux.Entry{Hub: &mux.HubRequest{Mode: hub.ModeSessions}})
 		},
 	}
 }

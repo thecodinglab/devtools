@@ -10,65 +10,36 @@ import (
 	"strings"
 )
 
-// defaultService is the service name when DEVTOOLS_SERVICE is not used.
-const defaultService = "devtools-server"
-
-// launchdPrefix is the label of a home-manager launchd agent without its
-// name.
-const launchdPrefix = "org.nix-community.home."
-
-// ServiceName is DEVTOOLS_SERVICE when it is set and made of [a-z0-9-] only,
-// else "devtools-server". RestartArgv, Restart and StartHint use the unit
-// <name>.service and the label org.nix-community.home.<name> (4.5).
-func ServiceName() string {
-	if v := os.Getenv(EnvService); validServiceName(v) {
-		return v
-	}
-	return defaultService
-}
-
-func validServiceName(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-			return false
-		}
-	}
-	return true
-}
-
-// RestartArgv is systemctl --user restart <name>.service on Linux and
-// launchctl kickstart -k gui/<uid>/org.nix-community.home.<name> on darwin.
+// RestartArgv is systemctl --user restart devtools-server.service on Linux
+// and launchctl kickstart -k gui/<uid>/org.nix-community.home.devtools-server
+// on darwin (4.5).
 func RestartArgv(uid int) []string {
-	return restartArgv(runtime.GOOS, uid, ServiceName())
+	return restartArgv(runtime.GOOS, uid)
 }
 
-func restartArgv(goos string, uid int, name string) []string {
+func restartArgv(goos string, uid int) []string {
 	if goos == "darwin" {
-		return []string{"launchctl", "kickstart", "-k", launchdTarget(uid, name)}
+		return []string{"launchctl", "kickstart", "-k", launchdTarget(uid)}
 	}
-	return []string{"systemctl", "--user", "restart", name + ".service"}
+	return []string{"systemctl", "--user", "restart", SystemdUnit}
 }
 
 // StartHint is the command a user runs to start the service, for error
-// texts: systemctl --user start <name> on Linux, launchctl kickstart
-// gui/<uid>/org.nix-community.home.<name> on darwin.
+// texts: systemctl --user start devtools-server on Linux, launchctl
+// kickstart gui/<uid>/org.nix-community.home.devtools-server on darwin.
 func StartHint() string {
-	return startHint(runtime.GOOS, os.Getuid(), ServiceName())
+	return startHint(runtime.GOOS, os.Getuid())
 }
 
-func startHint(goos string, uid int, name string) string {
+func startHint(goos string, uid int) string {
 	if goos == "darwin" {
-		return "launchctl kickstart " + launchdTarget(uid, name)
+		return "launchctl kickstart " + launchdTarget(uid)
 	}
-	return "systemctl --user start " + name
+	return "systemctl --user start " + strings.TrimSuffix(SystemdUnit, ".service")
 }
 
-func launchdTarget(uid int, name string) string {
-	return "gui/" + strconv.Itoa(uid) + "/" + launchdPrefix + name
+func launchdTarget(uid int) string {
+	return "gui/" + strconv.Itoa(uid) + "/" + LaunchdLabel
 }
 
 // runRestart runs the restart command; a test replaces it, so no test ever

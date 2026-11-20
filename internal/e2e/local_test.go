@@ -116,9 +116,7 @@ func TestServerRestartRestoresLayout(t *testing.T) {
 func TestNoServerNamesStartCommand(t *testing.T) {
 	m := newMachine(t, "desktop")
 	// The words name the start command of this platform; the command line
-	// sets ui.StartHint from platform.StartHint() before it prints them, and
-	// the environment of the machine names no service, as the test's own
-	// has none (TestMain removes DEVTOOLS_SERVICE).
+	// sets ui.StartHint from platform.StartHint() before it prints them.
 	words := ui.Message("noserver")
 	if _, err := lookPath(m.Env(), "tmux"); err == nil {
 		words = ui.Message("noserver", "tmux")

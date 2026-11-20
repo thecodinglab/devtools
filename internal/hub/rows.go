@@ -131,16 +131,7 @@ func (m *Model) machine(ev Event) *machine {
 		}
 	}
 	mc := newMachine(ev.Machine, stateOf(ev))
-	at := len(m.machines)
-	if m.sortMachines {
-		at = 1
-		for at < len(m.machines) && m.machines[at].name < ev.Machine {
-			at++
-		}
-	}
-	m.machines = append(m.machines, nil)
-	copy(m.machines[at+1:], m.machines[at:])
-	m.machines[at] = mc
+	m.machines = append(m.machines, mc)
 	return mc
 }
 

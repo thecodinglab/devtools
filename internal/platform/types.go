@@ -22,13 +22,8 @@ var ErrLocked = errors.New("platform: locked by another process")
 // darwin).
 var ErrUnsupported = errors.ErrUnsupported
 
-// The default service names (4.5). ServiceName replaces "devtools-server"
-// in both when DEVTOOLS_SERVICE is set.
+// The service names (4.5).
 const (
 	SystemdUnit  = "devtools-server.service"
 	LaunchdLabel = "org.nix-community.home.devtools-server"
 )
-
-// EnvService names the variable that overrides the service name; its value
-// is used only when it is made of [a-z0-9-].
-const EnvService = "DEVTOOLS_SERVICE"

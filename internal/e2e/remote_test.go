@@ -90,8 +90,8 @@ func remoteRow(rows []string, machine string) bool {
 // DEVTOOLS_E2E_REMOTE, and one scratch session in a temporary directory
 // there (far, P3-05b). Both are closed when the test ends, the remote
 // directory is removed, and nothing else is opened on either machine.
-// The session labelled DEVTOOLS_E2E_QUERY, which the run supplies
-// (rc-measure, 9.2), is only switched to, never typed into.
+// The session labelled DEVTOOLS_E2E_QUERY, which the run supplies, is only
+// switched to, never typed into.
 func realScene(t *testing.T) (a *Machine, x *Term, far scratch) {
 	t.Helper()
 	cfg, _ := Real()
@@ -131,7 +131,7 @@ type scratch struct {
 // farRequest sends req to the server of machine through a one-shot
 // connection over "ssh -T <machine> devtools bridge", the way the fleet
 // reaches it (4.4), with the ssh of a's PATH: the fake one, or in the
-// real mode the real one (the rehearsal's stand-in). The ssh process gets
+// real mode the real one. The ssh process gets
 // the environment of the test process, which in the real mode is the
 // environment the run was started with, without the marks of a context.
 func farRequest(a *Machine, machine string, req proto.Typed) (proto.Reply, error) {

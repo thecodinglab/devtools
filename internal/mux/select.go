@@ -2,7 +2,7 @@ package mux
 
 // Which backend a command uses (5.3.10 of the plan). The types are a
 // contract (6.2, P2-12); the bodies of Default and Select are written by
-// P2-13, the cutover constant by P2-09.
+// P2-13.
 
 import (
 	"errors"
@@ -40,29 +40,10 @@ func (e *ErrAmbiguous) Error() string {
 	return fmt.Sprintf("several multiplexers around this terminal: %v", e.Marks)
 }
 
-// cutover chooses the rule of Default: false is today's rule (herdr if it
-// is installed, else tmux), true is devtools. The cutover commit (P2-09)
-// sets it to true and changes nothing else in the package.
-const cutover = true
-
-// Default is the backend used when nothing chooses one.
-func Default(installed func(Backend) bool) Backend {
-	return defaultRule(cutover, installed)
-}
-
-// defaultRule holds both rules of Default; after is the value of cutover.
-// Before the cutover it is today's rule (internal/mux/mux.go:29-32 on
-// main): herdr if it is installed, else tmux. "Inside tmux" is no longer
-// part of it: a surrounding multiplexer is decided by Select before the
-// default is asked. A nil installed counts as nothing installed.
-func defaultRule(after bool, installed func(Backend) bool) Backend {
-	if after {
-		return Devtools
-	}
-	if installed != nil && installed(Herdr) {
-		return Herdr
-	}
-	return Tmux
+// Default is the backend used when nothing chooses one: devtools. A
+// surrounding multiplexer is decided by Select before the default is asked.
+func Default() Backend {
+	return Devtools
 }
 
 // The two sources of a backend name, as the errors of Select name them
@@ -129,7 +110,7 @@ func Select(c Context, ch Choice, available func(Backend) error) (Backend, error
 		}
 		pick = b
 	default:
-		pick = Default(func(b Backend) bool { return check(b) == nil })
+		pick = Default()
 	}
 	if err := check(pick); err != nil {
 		return "", &ErrUnavailable{Backend: pick, Reason: err.Error()}

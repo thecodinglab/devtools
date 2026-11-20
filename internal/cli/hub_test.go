@@ -10,7 +10,7 @@ import (
 
 // SEC-W1-01 (review of wave 1), the part P2-08b closed: agents and
 // sessions typed in a live tmux pane, with herdr installed and so the
-// default before the cutover, stay with tmux. sessions opens the tmux hub
+// default once, stay with tmux. sessions opens the tmux hub
 // in the pane; agents is refused by the feature gate with the unsupported
 // words and status 1, because tmux has no agents (mux.Features). Neither
 // asks herdr anything, starts its server or attaches a client of any

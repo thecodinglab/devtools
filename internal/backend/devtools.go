@@ -726,7 +726,7 @@ func ancestors() []int {
 // wireMode is the ui.hub mode of a hub mode (4.2.10).
 func wireMode(mode hub.Mode) string {
 	switch mode {
-	case hub.ModeOpen:
+	case hub.ModeSessions:
 		return proto.HubOpen
 	case hub.ModeNew:
 		return proto.HubNew

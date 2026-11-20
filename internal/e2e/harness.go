@@ -30,24 +30,14 @@ import (
 	"devtools/internal/testkit"
 )
 
-// namesDevtools says whether a scenario in a plain terminal names the
-// devtools backend itself. Until the cutover mux.Default is today's rule,
-// so a plain terminal would not reach the devtools backend: while this is
-// true, In(m, Plain) and (*Machine).Run add DEVTOOLS_MULTIPLEXER=devtools to
-// the environment. The other contexts never get it: there the surrounding
-// multiplexer decides, and the variable would be a mismatch. P2-09 sets it
-// to false in the cutover commit.
-const namesDevtools = false
-
 // EnvBin names the binary under test. Unset, TestMain builds ./cmd/devtools
 // into a temporary directory once per test run.
 const EnvBin = "DEVTOOLS_E2E_BIN"
 
 // EnvReal switches the suite to real machines (10.1.8): DEVTOOLS_E2E_REAL=1
 // with DEVTOOLS_E2E_REMOTE=<alias> and DEVTOOLS_E2E_QUERY=<session label>.
-// That mode is run only by the user or with a [GO] (9.2, 9.4), through
-// scripts/verify/rc-measure in the rehearsal. In it the tests use the
-// installed or rehearsal binary, the real ssh and the real server of each
+// That mode is run only by the user or with a [GO] (9.4). In it the tests
+// use the installed binary, the real ssh and the real server of each
 // machine; the harness starts, stops and writes nothing of them.
 const EnvReal = "DEVTOOLS_E2E_REAL"
 
@@ -107,7 +97,7 @@ func parseReal(getenv func(string) string) (RealConfig, bool, error) {
 
 // realFilterOK reports whether the -run pattern of a real run selects
 // only tests of RealTests: a non-empty alternation of their exact names,
-// optionally in "^(...)$" or "^...$", the form rc-measure passes. A
+// optionally in "^(...)$" or "^...$". A
 // pattern of any other shape could select an isolated test that would then
 // meet the real servers, so it is refused.
 func realFilterOK(pattern string) bool {
@@ -176,15 +166,6 @@ func setBinary(path string) error {
 		return fmt.Errorf("e2e: the binary under test %s is not an executable file", path)
 	}
 	binary = path
-	return nil
-}
-
-// plainEnv is what a scenario in a plain terminal adds to the environment:
-// the name of the devtools backend while namesDevtools holds, else nothing.
-func plainEnv() []string {
-	if namesDevtools {
-		return []string{envMultiplexer + "=devtools"}
-	}
 	return nil
 }
 

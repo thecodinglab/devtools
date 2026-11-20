@@ -83,7 +83,7 @@ func plain(m *Machine, cols, rows int) TermOptions {
 // XTVERSION with identity: no mark survives ssh, so its environment is that
 // of a plain terminal.
 func overSSH(identity string) TermOptions {
-	return TermOptions{Env: plainEnv(), Identity: identity}
+	return TermOptions{Identity: identity}
 }
 
 // openSession starts the client on m in a plain terminal of o on the

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"devtools/internal/platform"
 	"devtools/internal/testkit"
 )
 
@@ -28,7 +27,7 @@ var fakes = map[string]func(args []string) int{
 // can reach a multiplexer of the developer.
 var markVars = []string{
 	"DEVTOOLS_PANE", "DEVTOOLS_SOCKET", "DEVTOOLS_TTY", envMultiplexer, "DEVTOOLS_CONFIG",
-	"DEVTOOLS_ROOT", "DEVTOOLS_SERVICE", "DEVTOOLS_TRUST_TERMINAL", "DEVTOOLS_PASS_ENV",
+	"DEVTOOLS_ROOT", "DEVTOOLS_TRUST_TERMINAL", "DEVTOOLS_PASS_ENV",
 	"TMUX", "TMUX_PANE", "TMUX_TMPDIR", "STY", "WINDOW",
 }
 
@@ -74,13 +73,13 @@ func TestMain(m *testing.M) {
 }
 
 // enterReal switches this run to the real mode of 10.1.8, which the user
-// starts (rc-measure in the rehearsal, 9.2); the harness never does it on
+// starts; the harness never does it on
 // its own, and no automated run sets DEVTOOLS_E2E_REAL. original is the
 // environment the test binary was started with, run its -run pattern. It
 // refuses a run that could select a test outside RealTests and a run from
-// inside a multiplexer (the rehearsal is run from a plain terminal, 9.2);
+// inside a multiplexer (a real run is started from a plain terminal);
 // it sets the binary under test (DEVTOOLS_E2E_BIN, else the first devtools
-// on PATH: the installed or rehearsal binary, never a build) and the
+// on PATH: the installed binary, never a build) and the
 // environment of the real processes: the original one without the marks
 // of a context.
 func enterReal(cfg RealConfig, original []string, run string) error {
@@ -111,11 +110,10 @@ func enterReal(cfg RealConfig, original []string, run string) error {
 
 // realProcessEnv is original without the marks of a context (markVars and
 // markPrefixes) and without the variables of this harness; it keeps
-// DEVTOOLS_SERVICE, DEVTOOLS_CONFIG and the rest of what the user's
-// shell (or rc-measure) set: HOME, PATH with the ssh of the rehearsal,
+// DEVTOOLS_CONFIG and the rest of what the user's shell set: HOME, PATH,
 // XDG_CONFIG_HOME, SSH_AUTH_SOCK.
 func realProcessEnv(original []string) []string {
-	keep := map[string]bool{platform.EnvService: true, "DEVTOOLS_CONFIG": true}
+	keep := map[string]bool{"DEVTOOLS_CONFIG": true}
 	var out []string
 	for _, kv := range original {
 		name, _, _ := strings.Cut(kv, "=")

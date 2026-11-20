@@ -553,7 +553,7 @@ func TestShowsBeforeItemsLoadThenPlacesCursor(t *testing.T) {
 }
 
 func TestOpenModeWaitsForSessionsBeforeSayingNoneAreOpen(t *testing.T) {
-	m, _ := newTestModel(t, ModelOptions{Mode: ModeOpen})
+	m, _ := newTestModel(t, ModelOptions{Mode: ModeSessions})
 	m.Update(slowMsg{})
 	if view := ansi.Strip(m.View(m.width, m.height)); strings.Contains(view, "No open sessions") || !strings.Contains(view, "Loading open sessions") {
 		t.Fatalf("view = %q, want a loading note until the sessions are known", view)

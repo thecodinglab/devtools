@@ -65,7 +65,7 @@ func TestSelectIsTotal(t *testing.T) {
 								want = cfg
 							}
 							if want == "" {
-								want = string(Default(func(x Backend) bool { return a.set[x] }))
+								want = string(Default())
 							}
 							if string(b) != want {
 								t.Errorf("%s: Select = %s, want %s", where, b, want)
@@ -289,37 +289,11 @@ func TestAnUnavailableBackendIsAnErrorNotAFallback(t *testing.T) {
 	if !ok {
 		t.Fatalf("Select with nothing installed = %v, want *ErrUnavailable", err)
 	}
-	if want := Default(func(Backend) bool { return false }); u.Backend != want {
+	if want := Default(); u.Backend != want {
 		t.Fatalf("Select with nothing installed: unavailable %s, want the default %s", u.Backend, want)
 	}
 	if asked[len(asked)-1] != u.Backend {
 		t.Fatalf("the last backend asked is %s, want the one reported %s", asked[len(asked)-1], u.Backend)
-	}
-}
-
-func TestDefaultBeforeAndAfterTheCutover(t *testing.T) {
-	installed := func(set ...Backend) func(Backend) bool {
-		return func(b Backend) bool { return slices.Contains(set, b) }
-	}
-	for _, tt := range []struct {
-		name      string
-		installed func(Backend) bool
-		before    Backend
-	}{
-		{"herdr and tmux installed", installed(Herdr, Tmux), Herdr},
-		{"herdr only", installed(Herdr), Herdr},
-		{"every backend", installed(Devtools, Tmux, Herdr), Herdr},
-		{"tmux only", installed(Tmux), Tmux},
-		{"devtools and tmux", installed(Devtools, Tmux), Tmux},
-		{"nothing installed", installed(), Tmux},
-		{"no check", nil, Tmux},
-	} {
-		if got := defaultRule(false, tt.installed); got != tt.before {
-			t.Errorf("before the cutover, %s: %s, want %s", tt.name, got, tt.before)
-		}
-		if got := defaultRule(true, tt.installed); got != Devtools {
-			t.Errorf("after the cutover, %s: %s, want devtools", tt.name, got)
-		}
 	}
 }
 

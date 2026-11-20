@@ -135,12 +135,12 @@ func TestPassEnvIsSplitOnCommas(t *testing.T) {
 		t.Errorf("PassEnv of nothing = %q", got)
 	}
 	server := []string{
-		"DEVTOOLS_PASS_ENV=SSH_AUTH_SOCK,DEVTOOLS_MULTIPLEXER, DEVTOOLS_SERVICE",
-		"SSH_AUTH_SOCK=/run/agent", "DEVTOOLS_MULTIPLEXER=devtools", "DEVTOOLS_SERVICE=devtools-rc",
+		"DEVTOOLS_PASS_ENV=SSH_AUTH_SOCK,DEVTOOLS_MULTIPLEXER, DEVTOOLS_ROOT",
+		"SSH_AUTH_SOCK=/run/agent", "DEVTOOLS_MULTIPLEXER=devtools", "DEVTOOLS_ROOT=/srv/dev",
 		"EDITOR=nvim",
 	}
 	m := envMap(t, Env(server, nil, "p1", "/s"))
-	for name, want := range map[string]string{"SSH_AUTH_SOCK": "/run/agent", "DEVTOOLS_MULTIPLEXER": "devtools", "DEVTOOLS_SERVICE": "devtools-rc"} {
+	for name, want := range map[string]string{"SSH_AUTH_SOCK": "/run/agent", "DEVTOOLS_MULTIPLEXER": "devtools", "DEVTOOLS_ROOT": "/srv/dev"} {
 		if m[name] != want {
 			t.Errorf("%s = %q, want %q", name, m[name], want)
 		}

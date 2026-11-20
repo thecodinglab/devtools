@@ -82,7 +82,6 @@ func In(m *Machine, c Context) TermOptions {
 	o := TermOptions{Cols: 80, Rows: 24}
 	switch c {
 	case Plain:
-		o.Env = plainEnv()
 		o.Identity = ghosttyIdentity
 	case DevtoolsPane:
 		o.Env = m.openPane()

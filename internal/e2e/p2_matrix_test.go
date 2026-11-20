@@ -74,8 +74,7 @@ func tmuxCalls(log [][]string, name string) [][]string {
 }
 
 // tmuxTerminal is a plain terminal of m on a machine whose backend is tmux
-// by its config: no variable names a backend, so the config line decides
-// (namesDevtools is not applied; this scenario chooses its backend itself).
+// by its config: no variable names a backend, so the config line decides.
 func tmuxTerminal(identity string) TermOptions {
 	return TermOptions{Cols: 80, Rows: 24, Identity: identity}
 }

@@ -466,21 +466,13 @@ func checkMarks(t *testing.T, env []string, set ...string) {
 }
 
 func TestHarnessContextsCarryTheirMarks(t *testing.T) {
-	plain := []string{}
-	if namesDevtools {
-		plain = []string{envMultiplexer}
-	}
 	for _, tc := range []struct {
 		c        Context
 		set      []string
 		identity func(id string) bool
 		check    func(t *testing.T, m *Machine, o TermOptions)
 	}{
-		{Plain, plain, func(id string) bool { return id == ghosttyIdentity }, func(t *testing.T, m *Machine, o TermOptions) {
-			if namesDevtools && valueOf(o.Env, envMultiplexer) != "devtools" {
-				t.Errorf("a plain terminal does not name devtools: %q", o.Env)
-			}
-		}},
+		{Plain, []string{}, func(id string) bool { return id == ghosttyIdentity }, nil},
 		{DevtoolsPaneOverSSH, nil, func(id string) bool {
 			f := strings.Fields(id)
 			return len(f) == 3 && f[0] == "devtools"
@@ -725,25 +717,7 @@ func TestHarnessRealModeReadsItsThreeVariables(t *testing.T) {
 }
 
 func TestHarnessRealModeRunsOnlyTheReadAndSwitchTests(t *testing.T) {
-	// The pattern rc-measure passes, read from the script, is accepted.
-	root, err := moduleRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	script, err := os.ReadFile(filepath.Join(root, "scripts", "verify", "rc-measure"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var measured string
-	for _, line := range strings.Split(string(script), "\n") {
-		if v, ok := strings.CutPrefix(line, "TESTS="); ok {
-			measured = strings.Trim(v, `'"`)
-		}
-	}
-	if measured == "" {
-		t.Fatal("rc-measure has no line TESTS=")
-	}
-	for _, p := range []string{measured, "^(" + strings.Join(RealTests, "|") + ")$", "TestSwitchLocalHeldCold", "^TestInputLatencyRemote$"} {
+	for _, p := range []string{strings.Join(RealTests, "|"), "^(" + strings.Join(RealTests, "|") + ")$", "TestSwitchLocalHeldCold", "^TestInputLatencyRemote$"} {
 		if !realFilterOK(p) {
 			t.Errorf("%q is refused", p)
 		}
@@ -782,7 +756,7 @@ func TestHarnessRealModeEntersOnlyFromAPlainTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := []string{"HOME=" + dir, "PATH=" + bin + ":/usr/bin:/bin", EnvReal + "=1", EnvRemote + "=macmini", EnvQuery + "=devtools",
-		platform.EnvService + "=devtools-rc", "XDG_CONFIG_HOME=" + filepath.Join(dir, "config")}
+		"DEVTOOLS_CONFIG=" + filepath.Join(dir, "config", "devtools", "config"), "XDG_CONFIG_HOME=" + filepath.Join(dir, "config")}
 	run := "^(" + strings.Join(RealTests, "|") + ")$"
 
 	t.Run("enters", func(t *testing.T) {
@@ -799,7 +773,7 @@ func TestHarnessRealModeEntersOnlyFromAPlainTerminal(t *testing.T) {
 		if Binary() != filepath.Join(bin, devtools) {
 			t.Errorf("binary %q", Binary())
 		}
-		checkMarks(t, realEnv, platform.EnvService, "XDG_CONFIG_HOME", "HOME", "PATH")
+		checkMarks(t, realEnv, "DEVTOOLS_CONFIG", "XDG_CONFIG_HOME", "HOME", "PATH")
 		for _, n := range []string{envMultiplexer, "TMUX_PANE", EnvReal, EnvRemote, EnvQuery} {
 			if _, has := testkit.LookupEnv(realEnv, n); has {
 				t.Errorf("%s reaches the real processes", n)
@@ -889,9 +863,6 @@ func TestHarnessRealModeMachineIsTheRunningServer(t *testing.T) {
 	if valueOf(e, "HOME") != home || valueOf(e, "PATH") != "/usr/bin:/bin" || valueOf(e, "X") != "1" || valueOf(e, "SHELL") != "" {
 		t.Errorf("env %q", e)
 	}
-	if o := In(m, Plain); namesDevtools && valueOf(o.Env, envMultiplexer) != "devtools" {
-		t.Errorf("a plain terminal does not name devtools: %q", o.Env)
-	}
 	l := Connect(t, m, nil, "macmini", true)
 	if l.Alias() != "macmini" || l.Pids() != nil || l.Bridges() != 0 {
 		t.Errorf("link %+v", l)
@@ -912,8 +883,8 @@ func TestHarnessRealModeMachineIsTheRunningServer(t *testing.T) {
 	}
 }
 
-// TestHarnessRealModeReachesTheTests runs this test binary as rc-measure
-// runs the package, with DEVTOOLS_E2E_REAL=1 and the filter of the real
+// TestHarnessRealModeReachesTheTests runs this test binary as a real run
+// does, with DEVTOOLS_E2E_REAL=1 and the filter of the real
 // tests, in a fixture environment under a temporary HOME. -test.list makes
 // it list the selected tests instead of running them, so TestMain's
 // dispatch is exercised up to m.Run and nothing reaches a server. A filter

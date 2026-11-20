@@ -151,7 +151,7 @@ func newMachine(t *testing.T, name string) *Machine {
 }
 
 // startReal is StartMachine in the real mode: the machine of the real local
-// server, the installed or the rehearsal one, which must already run. HOME
+// server, the installed one, which must already run. HOME
 // and the state directory are those of the environment the user started
 // the run with (realEnv); the machine's directory is a short temporary
 // directory that holds only the harness's own files and the link to the
@@ -196,7 +196,7 @@ func startReal(t *testing.T, name string) *Machine {
 	m.link(devtools, binary)
 	c, err := net.DialTimeout("unix", m.Socket(), 5*time.Second)
 	if err != nil {
-		t.Fatalf("e2e: %s=1: the local server does not answer on %s (start it first: rc-server start in the rehearsal, 9.2): %v", EnvReal, m.Socket(), err)
+		t.Fatalf("e2e: %s=1: the local server does not answer on %s (start devtools-server first): %v", EnvReal, m.Socket(), err)
 	}
 	c.Close()
 	return m
@@ -463,11 +463,10 @@ type Result struct {
 }
 
 // Run runs one one-shot command as `devtools <args>` without a terminal, in
-// a plain context (the devtools backend is named while namesDevtools holds,
-// as In(m, Plain) does), and returns its standard output and exit status.
+// a plain context, as In(m, Plain), and returns its standard output and exit status.
 func (m *Machine) Run(args ...string) (stdout string, exit int) {
 	m.state().t.Helper()
-	r := m.RunWith(RunOptions{Env: plainEnv()}, args...)
+	r := m.RunWith(RunOptions{}, args...)
 	return r.Stdout, r.Exit
 }
 

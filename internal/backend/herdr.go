@@ -8,8 +8,6 @@ package backend
 // so Show outside herdr is refused, and Snapshot and FocusPane are refused
 // before anything runs (R14). Enter is the one method that starts a herdr
 // client, through herdr.Attach and only with a valid guard pass.
-// herdr.Inside, herdr.CloseForRemoval and herdr.Visit are not called: they
-// read the environment, and P2-09 deletes them.
 
 import (
 	"context"

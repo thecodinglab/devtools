@@ -86,9 +86,9 @@ type CreateRequest struct {
 type Mode int
 
 const (
-	ModeAll  Mode = iota // every worktree
-	ModeOpen             // only open sessions; its new name ModeSessions is in event.go
-	ModeNew              // name a new feature
+	ModeAll      Mode = iota // every worktree
+	ModeSessions             // only open sessions
+	ModeNew                  // name a new feature
 )
 
 // Picked is what the hub chose: the row and the target it means (the pick
@@ -130,9 +130,6 @@ type Model struct {
 	// machines in the order of their first event: this machine first, then
 	// the others in config order (3.5.3)
 	machines []*machine
-	// sortMachines orders the other machines by name, for the legacy
-	// adapter, whose machines answer in no order (P2-09 removes it)
-	sortMachines bool
 
 	// items are every row the hub holds, joined: per machine its catalog
 	// rows (with their session), its sessions that belong to no catalog

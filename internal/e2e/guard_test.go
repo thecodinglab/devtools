@@ -78,7 +78,7 @@ func TestGuardRefusesUnderScreenEnv(t *testing.T) {
 			t.Run(name+"/"+cmd, func(t *testing.T) {
 				// The terminal itself is plain (it answers as ghostty); the
 				// mark says screen or zellij runs around it.
-				o := TermOptions{Env: append(plainEnv(), mark.kv), Identity: ghosttyIdentity}
+				o := TermOptions{Env: []string{mark.kv}, Identity: ghosttyIdentity}
 				refused(t, m, o, ui.Message("othermux", devtools, mark.where), cmd)
 			})
 		}
