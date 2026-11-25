@@ -352,19 +352,27 @@ func rightLine(s State, p plan) *rowLine {
 	return b
 }
 
-// fleetEntries is the fleet strip: one entry per configured machine other
-// than this one, in config order, by state (5a.6.2).
+// fleetEntries is the fleet strip: the update mark of this machine, then
+// one entry per configured machine other than this one, in config order,
+// by state (5a.6.2).
 func fleetEntries(s State, p plan) []entry {
-	if !p.fleet || len(s.Summary.Machines) < 2 {
+	if !p.fleet || len(s.Summary.Machines) == 0 {
 		return nil
 	}
 	th := s.Theme
 	var out []entry
+	if s.Summary.Machines[0].Installed != "" {
+		out = append(out, entry{{updateMark(th) + " " + ui.FleetUpdate, roleFace(th, ui.RoleMuted)}})
+	}
 	for _, m := range s.Summary.Machines[1:] {
 		switch m.State {
 		case "online":
 			if p.online {
-				out = append(out, entry{{m.Name, roleFace(th, ui.RoleComment)}})
+				e := entry{{m.Name, roleFace(th, ui.RoleComment)}}
+				if m.Installed != "" {
+					e = append(e, span{" ", ui.Face{}}, span{updateMark(th), roleFace(th, ui.RoleMuted)})
+				}
+				out = append(out, e)
 			}
 		case "connecting":
 			out = append(out, entry{{m.Name + " " + th.Glyph(ui.GlyphEllipsis), roleFace(th, ui.RoleMuted)}})
@@ -384,6 +392,11 @@ func fleetEntries(s State, p plan) []entry {
 	}
 	return out
 }
+
+// updateMark marks a machine whose server waits for a restart to run the
+// build installed there: the glyph of ahead, a newer build ahead of the
+// running one.
+func updateMark(th ui.Theme) string { return th.Glyph(ui.GlyphAhead) }
 
 // rollupEntries is the roll-up: the blocked, done and working counts that
 // are above zero, the place of the most urgent agent after its count.
@@ -685,18 +698,23 @@ func longestHintLabel() int {
 	for _, o := range ui.HintOrder() {
 		n = max(n, ui.Width(ui.HintLabel(o[0], o[1])))
 	}
-	return max(n, ui.Width(escHint.label))
+	return max(n, ui.Width(escHint.label), ui.Width(ui.HintUpdate))
 }
 
 // hints is the hint strip of 5a.11.2: "esc cancel", then one hint per
 // action of ui.HintOrder that has a chord after the prefix, with the first
-// such chord as its key. An action without one is left out.
-func (l *look) hints() []hint {
+// such chord as its key. An action without one is left out. While this
+// machine's server waits for a restart to run an installed update, the
+// strip ends with the update mark and what it means.
+func (l *look) hints(s State) []hint {
 	out := []hint{escHint}
 	for _, o := range ui.HintOrder() {
 		if k := l.hintKey(o[0], o[1]); k != "" {
 			out = append(out, hint{k, ui.HintLabel(o[0], o[1])})
 		}
+	}
+	if len(s.Summary.Machines) > 0 && s.Summary.Machines[0].Installed != "" {
+		out = append(out, hint{updateMark(s.Theme), ui.HintUpdate})
 	}
 	return out
 }
@@ -805,7 +823,7 @@ var hintStart = ui.Width(" "+ui.ModePrefix+" ") + blockSpace
 // at its end when there is more than one page. The right group is hidden.
 func (l *look) hintRow(s State, width int) ([]piece, int) {
 	th := s.Theme
-	pages := hintPages(l.hints(), width-rowMargin-hintStart)
+	pages := hintPages(l.hints(s), width-rowMargin-hintStart)
 	n := len(pages)
 	page := pages[((s.HintPage%n)+n)%n]
 	build := func(r modeRow) ([]piece, int) {

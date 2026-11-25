@@ -154,6 +154,42 @@ func statusText(t *testing.T, l *look, s State, width int) string {
 	return tc.Row(0)
 }
 
+// statusUpdate is statusStandard with an update installed on this machine
+// and on macmini, both waiting for a restart of their server.
+func statusUpdate() State {
+	s := statusStandard()
+	s.Summary.Machines[0].Installed = "0.1.0+04c5fef"
+	s.Summary.Machines[1].Installed = "unknown"
+	return s
+}
+
+// The update mark: "↑ update" for this machine at the start of the fleet
+// strip, "↑" after an online machine's name; it goes with the strip. The
+// hint strip ends with what the mark means.
+func TestStatusRowMarksAnInstalledUpdate(t *testing.T) {
+	for _, w := range []int{135, 80} {
+		statusGolden(t, fmt.Sprintf("status-update-%d", w), statusUpdate(), w)
+	}
+	s := statusUpdate()
+	s.Summary.Machines = s.Summary.Machines[:1]
+	statusGolden(t, "status-update-alone-80", s, 80)
+
+	s = statusUpdate()
+	s.Mode, s.Hints, s.HintPage = "prefix", true, -1
+	statusGolden(t, "status-hints-update-80", s, 80)
+
+	l := statusLook()
+	th, _ := statusThemes(t, true)
+	s.Theme = th
+	hs := l.hints(s)
+	if last := hs[len(hs)-1]; last.key != "↑" || last.label != ui.HintUpdate {
+		t.Fatalf("the strip ends with %+v", last)
+	}
+	if n, without := len(hs), len(l.hints(statusStandard())); n != without+1 {
+		t.Fatalf("%d hints with an update, %d without", n, without)
+	}
+}
+
 func TestStatusRowAtEveryWidth(t *testing.T) {
 	for _, w := range []int{135, 80, 60, 40, 20} {
 		statusGolden(t, fmt.Sprintf("status-standard-%d", w), statusStandard(), w)
@@ -351,7 +387,7 @@ func TestHintStripPages(t *testing.T) {
 	statusGolden(t, "status-hints-more-80", s, 80)
 
 	for _, w := range []int{20, 40, 60, 80, 120} {
-		pages := hintPages(l.hints(), w-rowMargin-hintStart)
+		pages := hintPages(l.hints(State{}), w-rowMargin-hintStart)
 		if len(pages) < 2 {
 			t.Fatalf("%d columns: %d pages", w, len(pages))
 		}
@@ -367,8 +403,8 @@ func TestHintStripPages(t *testing.T) {
 				seen = append(seen, hintOf(l, k.text))
 			}
 		}
-		if fmt.Sprint(seen) != fmt.Sprint(l.hints()) {
-			t.Errorf("%d columns: the pages hold %v, want every hint once: %v", w, seen, l.hints())
+		if fmt.Sprint(seen) != fmt.Sprint(l.hints(State{})) {
+			t.Errorf("%d columns: the pages hold %v, want every hint once: %v", w, seen, l.hints(State{}))
 		}
 		s.HintPage = len(pages)
 		again := statusText(t, l, s, w)
@@ -392,7 +428,7 @@ func keyPieces(pieces []piece) []piece {
 
 // hintOf is the hint of the strip whose key is key.
 func hintOf(l *look, key string) hint {
-	for _, h := range l.hints() {
+	for _, h := range l.hints(State{}) {
 		if h.key == key {
 			return h
 		}
@@ -469,7 +505,7 @@ func statusCases() []statusCase {
 	var out []statusCase
 	bases := []statusCase{
 		{"standard", statusStandard()}, {"remote", statusRemote()}, {"chip64", statusChip64()},
-		{"stale", statusStale()}, {"none", statusNone()},
+		{"stale", statusStale()}, {"none", statusNone()}, {"update", statusUpdate()},
 	}
 	long := ui.Notice("older-server")
 	for _, b := range bases {
@@ -540,12 +576,13 @@ func TestStatusRowNeverExceedsTheWidth(t *testing.T) {
 func TestNoKeyIsEverCut(t *testing.T) {
 	l := statusLook()
 	whole := map[string]bool{"esc": true, "?": true, "v": true, "y": true, "q": true}
-	for _, h := range l.hints() {
+	for _, h := range l.hints(State{}) {
 		whole[h.key] = true
 	}
 	for _, utf8 := range []bool{true, false} {
 		tc, pal := statusThemes(t, utf8)
 		whole[tc.Glyph(ui.GlyphEnter)] = true
+		whole[tc.Glyph(ui.GlyphAhead)] = true // the update mark of the hint strip
 		for _, th := range []ui.Theme{tc, pal} {
 			for _, c := range statusCases() {
 				s := c.s
@@ -651,7 +688,7 @@ func TestEveryHintFitsAtTwoHundredColumns(t *testing.T) {
 	if got := statusText(t, l, s, 200); got != want {
 		t.Errorf("at 200 columns:\n got %q\nwant %q", got, want)
 	}
-	if n := len(hintPages(l.hints(), 200-rowMargin-hintStart)); n != 1 {
+	if n := len(hintPages(l.hints(State{}), 200-rowMargin-hintStart)); n != 1 {
 		t.Errorf("%d pages at 200 columns", n)
 	}
 }
@@ -665,7 +702,7 @@ func TestHintsFollowTheBindingTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := NewLook(LookOptions{Chords: table.Chords}).(*look)
-	got := fmt.Sprint(l.hints())
+	got := fmt.Sprint(l.hints(State{}))
 	for _, want := range []string{"{t new tab}", "{f new feature}", "{) session}", "{1-9 tab}"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("hints %s do not hold %s", got, want)

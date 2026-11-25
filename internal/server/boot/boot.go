@@ -123,6 +123,10 @@ func (r *run) release() {
 func (r *run) main() int {
 	r.log = slog.New(slog.NewTextHandler(stderr, nil)).With("component", "server")
 
+	// Where the service started this binary from, before step 7 changes the
+	// directory: the server watches it for an installed update.
+	program, executable := programPath(), executablePath()
+
 	// (1) SHELL is set and executable.
 	if err := checkShell(os.Getenv("SHELL")); err != nil {
 		return r.fail(err)
@@ -208,6 +212,7 @@ func (r *run) main() int {
 	o.Env = os.Environ()
 	o.Version = r.version
 	o.Host = host
+	o.Program, o.Executable = program, executable
 	o.Log = r.log
 	srv, err := newServer(o)
 	if err != nil {
@@ -504,4 +509,26 @@ func oneLine(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// programPath is the path the service started this binary through, absolute:
+// argv[0], which nix/service.nix sets to the devtools of the profile, a
+// symlink that follows the active generation. "" when argv[0] is a bare
+// name, found in PATH by whoever started it: then nothing is watched.
+func programPath() string {
+	if len(os.Args) == 0 || !strings.Contains(os.Args[0], "/") {
+		return ""
+	}
+	abs, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		return ""
+	}
+	return abs
+}
+
+// executablePath is the file whose image runs, as the kernel names it and
+// not through the symlink the service started it by: "" when it cannot be
+// told (platform.RunningExecutable).
+func executablePath() string {
+	return platform.RunningExecutable()
 }

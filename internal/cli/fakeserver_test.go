@@ -33,17 +33,19 @@ type fakeServer struct {
 	socket string
 	ln     net.Listener
 
-	mu       sync.Mutex
-	snap     proto.Snapshot
-	noClient bool            // ui.hub and ui.switch answer err no-client
-	refuse   string          // a hello with a pane is refused with this code
-	moved    bool            // pane.focus answers moved
-	silent   bool            // accept, read, never answer
-	garbage  bool            // answer the hello with bytes that are no message
-	hangup   map[string]bool // close the connection instead of answering these types
-	hellos   []proto.Hello
-	requests []string // "type {body}" of every request, in order
-	conns    []net.Conn
+	mu        sync.Mutex
+	snap      proto.Snapshot
+	noClient  bool            // ui.hub and ui.switch answer err no-client
+	refuse    string          // a hello with a pane is refused with this code
+	moved     bool            // pane.focus answers moved
+	silent    bool            // accept, read, never answer
+	garbage   bool            // answer the hello with bytes that are no message
+	hangup    map[string]bool // close the connection instead of answering these types
+	version   string          // welcome.version; "" is "fake"
+	installed string          // welcome.installed
+	hellos    []proto.Hello
+	requests  []string // "type {body}" of every request, in order
+	conns     []net.Conn
 }
 
 func newFakeServer(t *testing.T, snap proto.Snapshot) *fakeServer {
@@ -96,6 +98,10 @@ func (f *fakeServer) handle(conn net.Conn) {
 	f.mu.Lock()
 	f.hellos = append(f.hellos, hello)
 	silent, garbage, refuse := f.silent, f.garbage, f.refuse
+	welcome := proto.Welcome{Gen: proto.Gen, Version: "fake", Boot: "b1", Host: "fakehost", Pid: 1, Client: "c1", Installed: f.installed}
+	if f.version != "" {
+		welcome.Version = f.version
+	}
 	f.mu.Unlock()
 	switch {
 	case silent:
@@ -113,7 +119,7 @@ func (f *fakeServer) handle(conn net.Conn) {
 		proto.WriteMsg(conn, proto.Encode(proto.Refuse{Code: refuse, Text: hello.Pane + " is not the pane of this process"}))
 		return
 	}
-	proto.WriteMsg(conn, proto.Encode(proto.Welcome{Gen: proto.Gen, Version: "fake", Boot: "b1", Host: "fakehost", Pid: 1, Client: "c1"}))
+	proto.WriteMsg(conn, proto.Encode(welcome))
 	for {
 		msg, err := proto.ReadMsg(conn)
 		if err != nil {

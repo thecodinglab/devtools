@@ -19,6 +19,11 @@ const (
 	// layout (Tab.Tree reads its tabs); a receiver without it ignores the
 	// layout field.
 	CapTree = "tree"
+	// CapUpdate: event.update, which tells a connection that another build
+	// was installed (or the installed build is the running one again) while
+	// it is connected. welcome.installed says the same at the handshake to
+	// everyone; a peer without the capability reads only that.
+	CapUpdate = "update"
 )
 
 // Message types of cross.go.
@@ -34,6 +39,8 @@ const (
 	TypeCatalogStop  = "catalog.stop"
 
 	TypeEventAgent = "event.agent"
+
+	TypeEventUpdate = "event.update"
 )
 
 // Values of ui.hub mode (4.2.10). The field has no "unknown": any other
@@ -64,6 +71,7 @@ func init() {
 		func() Typed { return &CatalogDone{} },
 		func() Typed { return &CatalogStop{} },
 		func() Typed { return &AgentEvent{} },
+		func() Typed { return &UpdateEvent{} },
 	} {
 		register(f)
 	}
@@ -194,3 +202,16 @@ func (e *AgentEvent) normalize() {
 		e.Status = Unknown
 	}
 }
+
+// --- event.update (capability update) ---
+
+// UpdateEvent is event.update: sent on every interactive connection that
+// has CapUpdate when what welcome.installed says changes. Installed is the
+// version of the build installed where the service starts the server, when
+// it is another build than the running one ("unknown" when it did not say
+// its version); "" when the running build is the installed one again.
+type UpdateEvent struct {
+	Installed string `json:"installed"`
+}
+
+func (UpdateEvent) Type() string { return TypeEventUpdate }

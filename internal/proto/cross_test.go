@@ -37,6 +37,8 @@ func crossSamples() []struct {
 		{0, &AgentEvent{Session: "s4", Tab: "t17", Pane: "p52", Kind: AgentClaude,
 			Status: StatusBlocked, Title: "fix the tests", Shown: true}},
 		{0, &AgentEvent{Session: "s4", Tab: "t18", Pane: "p53", Kind: AgentCodex, Status: StatusDone}},
+		{0, &UpdateEvent{Installed: "0.1.0+04c5fef"}},
+		{0, &UpdateEvent{}},
 	}
 }
 
@@ -142,5 +144,26 @@ func TestUnknownFieldsAreIgnored(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s\n  got:  %+v\n  want: %+v", tc.body, got, tc.want)
 		}
+	}
+}
+
+// A welcome without installed, the one of a server from before CapUpdate,
+// reads as no update waiting; one with it reads the version, and an older
+// receiver's tolerant decode skips the field.
+func TestWelcomeInstalledIsOptional(t *testing.T) {
+	var old Welcome
+	if err := (Msg{T: TypeWelcome, Body: []byte(`{"t":"welcome","gen":1,"version":"dev","boot":"b","host":"h","pid":1,"client":"c1","clients":1}`)}).Decode(&old); err != nil || old.Installed != "" {
+		t.Fatalf("old welcome: %+v, %v", old, err)
+	}
+	m := Encode(Welcome{Gen: Gen, Version: "0.1.0+6ee3170"})
+	if bytes.Contains(m.Body, []byte("installed")) {
+		t.Fatalf("a welcome without an update carries installed: %s", m.Body)
+	}
+	m = Encode(Welcome{Gen: Gen, Version: "0.1.0+6ee3170", Installed: "0.1.0+04c5fef"})
+	var older struct {
+		Version string `json:"version"`
+	}
+	if err := m.Decode(&older); err != nil || older.Version != "0.1.0+6ee3170" {
+		t.Fatalf("older receiver: %+v, %v", older, err)
 	}
 }

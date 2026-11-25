@@ -13,7 +13,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -33,14 +32,6 @@ var (
 	runServer      = boot.Run
 	restartService = platform.Restart
 )
-
-// version is the version of this build, for the hellos and server status.
-var version = func() string {
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
-	return "dev"
-}()
 
 // statusLimit bounds the questions of server status and server restart.
 const statusLimit = 2 * time.Second
@@ -72,7 +63,25 @@ type serverStatus struct {
 	Panes    int    `json:"panes"`
 	Clients  int    `json:"clients"`
 	Socket   string `json:"socket"`
-	running  int    // panes whose program runs
+	// What this devtools is and what the server says is installed. Only
+	// the server tells whether a restart starts another build: it compares
+	// the build the service starts with its own image (internal/server/
+	// update.go). This devtools may be another build that is not
+	// installed (one of a worktree, say), and a server from before the
+	// watch says nothing, so a version of this devtools other than the
+	// server's is reported as such and is no pending restart.
+	CLIVersion string `json:"cli_version"`
+	Installed  string `json:"installed"`       // welcome.installed: another build installed, as the server saw it; "" none
+	Restart    bool   `json:"restart_pending"` // the server says another build is installed
+	Other      bool   `json:"cli_differs"`     // this devtools is another version than the server's
+	running    int    // panes whose program runs
+}
+
+// drift fills the fields that compare the server's build with this one.
+func (st *serverStatus) drift() {
+	st.CLIVersion = version
+	st.Restart = st.Installed != ""
+	st.Other = st.Version != version
 }
 
 func serverStatusCommand(stdout io.Writer) *cobra.Command {
@@ -92,6 +101,12 @@ func serverStatusCommand(stdout io.Writer) *cobra.Command {
 			fmt.Fprintf(stdout, "running, pid %d, version %s, protocol %d\n", st.Pid, st.Version, st.Gen)
 			fmt.Fprintf(stdout, "%d sessions, %d panes, %d windows\n", st.Sessions, st.Panes, st.Clients)
 			fmt.Fprintf(stdout, "socket %s\n", st.Socket)
+			switch {
+			case st.Restart:
+				fmt.Fprintln(stdout, ui.Message("drift", st.Version, st.Installed))
+			case st.Other:
+				fmt.Fprintln(stdout, ui.Message("otherbuild", st.Version, st.CLIVersion))
+			}
 			return nil
 		},
 	}
@@ -171,7 +186,9 @@ func askServer() (serverStatus, error) {
 			st := serverStatus{
 				Pid: w.Pid, Version: w.Version, Gen: w.Gen, Boot: w.Boot,
 				Sessions: len(snap.Sessions), Panes: len(snap.Panes), Clients: w.Clients, Socket: socket,
+				Installed: w.Installed,
 			}
+			st.drift()
 			for _, p := range snap.Panes {
 				if p.State == proto.PaneRunning {
 					st.running++

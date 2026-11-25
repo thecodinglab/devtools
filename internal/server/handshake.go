@@ -128,14 +128,15 @@ func (c *core) admit(nc net.Conn, h proto.Hello) (*conn, string, string) {
 	c.s.conns[cn] = true
 	c.s.mu.Unlock()
 	c.send(cn, proto.Encode(proto.Welcome{
-		Gen:     h.Gen, // the client's, which this server speaks: an older client checks for its own
-		Version: c.s.o.Version,
-		Caps:    c.caps(),
-		Boot:    c.s.boot,
-		Host:    c.host(),
-		Pid:     pid(),
-		Client:  cn.id,
-		Clients: c.reg.interactive(),
+		Gen:       h.Gen, // the client's, which this server speaks: an older client checks for its own
+		Version:   c.s.o.Version,
+		Caps:      c.caps(),
+		Boot:      c.s.boot,
+		Host:      c.host(),
+		Pid:       pid(),
+		Client:    cn.id,
+		Clients:   c.reg.interactive(),
+		Installed: c.installed,
 	}))
 	if cn.kind == proto.KindInteractive {
 		c.send(cn, proto.Encode(c.snapshot()))
@@ -172,10 +173,10 @@ func (c *core) paneOfProcess(id string, ancestors []int) bool {
 	return info.Pid > 0 && contains(ancestors, info.Pid)
 }
 
-// caps are welcome.caps: stateget and tree, which the core implements,
-// and what the extensions add.
+// caps are welcome.caps: stateget, tree and update, which the core
+// implements, and what the extensions add.
 func (c *core) caps() []string {
-	caps := []string{proto.CapStateGet, proto.CapTree}
+	caps := []string{proto.CapStateGet, proto.CapTree, proto.CapUpdate}
 	for _, x := range extensionCaps() {
 		if !slices.Contains(caps, x) {
 			caps = append(caps, x)

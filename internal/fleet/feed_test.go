@@ -468,6 +468,9 @@ func TestARowReportedAgainAndAgainWaitsForAnUnreadHubOnce(t *testing.T) {
 
 func TestAMachineThatFloodsAnUnreadHubIsSentInFullWhenTheHubReads(t *testing.T) {
 	r := start(t, "M", "K")
+	w := r.M("M").Welcome()
+	w.Version, w.Installed = "0.1.0+6ee3170", "0.1.0+04c5fef"
+	r.M("M").SetWelcome(w)
 	r.M("M").Online(fleettest.Snapshot(fleettest.Sess{N: 2, Dir: "/home/florian/dev/m", Label: "m", Agent: proto.StatusIdle}))
 	r.M("K").Online(fleettest.Snapshot(fleettest.Sess{N: 3, Dir: "/home/florian/dev/k", Label: "k"}))
 	ch := r.Hub() // opened, not read for now
@@ -513,5 +516,9 @@ func TestAMachineThatFloodsAnUnreadHubIsSentInFullWhenTheHubReads(t *testing.T) 
 	}
 	if last.Kind != hub.Online {
 		t.Fatalf("the last state event of M is %s, want Online", fleettest.EventName(last.Kind))
+	}
+	// and it keeps the builds of M's server
+	if last.Version != "0.1.0+6ee3170" || last.Installed != "0.1.0+04c5fef" {
+		t.Fatalf("the last Online of M lost the builds: version %q, installed %q", last.Version, last.Installed)
 	}
 }

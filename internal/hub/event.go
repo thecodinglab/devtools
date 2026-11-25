@@ -37,6 +37,10 @@ const (
 	// list reached its bound, 2,000 items, 500 sessions or 1,000 panes;
 	// Err.Text is the bound) or "incomplete" (the scan did not finish).
 	Note
+	// Build is what the machine's server says of the build installed
+	// there (event.update): Installed, with Version as Online gave it. It
+	// changes neither the state nor the rows.
+	Build
 )
 
 // Problem is why a machine is not usable.
@@ -54,6 +58,12 @@ type Event struct {
 	Path    string
 	Git     ui.Git
 	Err     Problem
+	// Version and Installed, on Online and Build: welcome.version of the
+	// machine's server, and the build installed there that waits for a
+	// restart of the server ("" none, "unknown" one that did not say its
+	// version), both sanitised.
+	Version   string
+	Installed string
 }
 
 // Actions is the local-only work the hub may ask for.

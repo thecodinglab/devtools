@@ -106,10 +106,16 @@ func (f *Fleet) closeHub() {
 // hubOnline is what the hub gets of a machine that is online: the state,
 // its sessions and agents, the cached catalog, and then a new scan.
 func (f *Fleet) hubOnline(mc *machine) {
-	f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Online})
+	f.hubEvent(onlineEvent(mc))
 	f.hubState(mc)
 	f.hubCache(mc, true)
 	f.startCatalog(mc)
+}
+
+// onlineEvent is the Online of mc, with the builds of its server: the
+// first one a hub gets and the one of a resync alike.
+func onlineEvent(mc *machine) hub.Event {
+	return hub.Event{Machine: mc.name, Kind: hub.Online, Version: mc.version, Installed: mc.installed}
 }
 
 // hubCache is the catalog of mc's last finished scan, if there is one; with
@@ -162,7 +168,7 @@ func (f *Fleet) hubResync(mc *machine) {
 		// which forgets what the scans it saw reported: the next Complete
 		// keeps only rows sent from here on
 		f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Connecting})
-		f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Online})
+		f.hubEvent(onlineEvent(mc))
 		f.hubState(mc)
 		f.hubCache(mc, true)
 		switch c := &mc.cat; {

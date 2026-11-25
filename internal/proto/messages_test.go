@@ -23,6 +23,7 @@ var crossTypes = map[string]bool{
 	"event.agent": true, "ui.hub": true, "ui.switch": true,
 	"catalog.watch": true, "catalog.item": true, "catalog.git": true,
 	"catalog.error": true, "catalog.done": true, "catalog.stop": true,
+	"event.update": true,
 }
 
 type wireExample struct {

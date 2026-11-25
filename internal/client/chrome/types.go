@@ -66,6 +66,10 @@ type Machine struct {
 	Reason     string // one sanitised line, "" none
 	Agents     map[string]int
 	Busy       int // agents that were not idle in the last snapshot; kept while State is "off" (the `{m} off` entry of 5a.6.2)
+	// Installed is the build installed on the machine that waits for a
+	// restart of its server: "" none, "unknown" a build that did not say
+	// its version. The fleet strip marks it.
+	Installed string
 }
 
 // Copy is the position of copy mode or of the scrolled view.

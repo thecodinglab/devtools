@@ -1,0 +1,2 @@
+size 80x1 cursor 0,0 hidden
+ prefix   d detach   ↑ update installed, run devtools server restart   ? more|

@@ -99,6 +99,9 @@ func (f *Fleet) computeSummary() SummaryData {
 			Problem: mc.problem,
 			Agents:  map[agent.Status]int{},
 			Busy:    mc.busy,
+
+			Version:   mc.version,
+			Installed: mc.installed,
 		}
 		if mc.online() && mc.st != nil {
 			ms.Busy = notIdle(mc.st)

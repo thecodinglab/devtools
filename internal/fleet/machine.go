@@ -35,6 +35,11 @@ type machine struct {
 	status  string // "off", "connecting", "online", "retrying", "attention"
 	problem hub.Problem
 	host    string // welcome.host, sanitised
+	// the build of its server: welcome.version, and the build installed
+	// there that waits for a restart (welcome.installed, event.update);
+	// sanitised, kept after the link is gone
+	version   string
+	installed string
 
 	// the link and its attempt; gen changes with every attempt, so what an
 	// older link or dial still delivers is recognised and dropped
@@ -201,6 +206,7 @@ func (f *Fleet) dialed(mc *machine, gen int, link remote.Link, fail *remote.Fail
 	}
 	mc.link, mc.welcome, mc.nextID = link, w, 0
 	mc.host = cleanHost(w.Host)
+	mc.version, mc.installed = cleanVersion(w.Version), cleanVersion(w.Installed)
 	f.pump(mc, gen, link)
 	// online once the first snapshot is read (3.5.2); the attempt limit
 	// runs until then
@@ -283,6 +289,13 @@ func (f *Fleet) linkMessage(lm linkMsg) {
 		var e proto.AgentEvent
 		if m.Decode(&e) == nil {
 			f.agentEvent(mc, e)
+		}
+	case proto.TypeEventUpdate:
+		var e proto.UpdateEvent
+		if m.Decode(&e) == nil && cleanVersion(e.Installed) != mc.installed {
+			mc.installed = cleanVersion(e.Installed)
+			f.dirty = true
+			f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Build, Version: mc.version, Installed: mc.installed})
 		}
 	case proto.TypeCatalogItem, proto.TypeCatalogGit, proto.TypeCatalogError, proto.TypeCatalogDone:
 		f.catalogMessage(mc, m)
@@ -556,6 +569,10 @@ func (f *Fleet) stopIdle() {
 // cleanHost is welcome.host as it may be shown (SEC7, SEC8): secondary
 // text, never a key.
 func cleanHost(h string) string { return session.Sanitize(h, maxHost) }
+
+// cleanVersion is a version another machine reports, as it may be shown:
+// secondary text, never a key.
+func cleanVersion(v string) string { return session.Sanitize(v, maxVersion) }
 
 // itoa formats a bound for a note.
 func itoa(n int) string { return strconv.Itoa(n) }

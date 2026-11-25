@@ -79,6 +79,7 @@ devtools session list --json
 devtools pane list --json
 devtools pane focus --direction left|right|up|down
 devtools server [status [--json] | restart [--yes]]
+devtools version
 devtools bookmark add <name> [path]
 devtools bookmark remove <name>
 devtools bookmark list
@@ -331,6 +332,30 @@ bind alt+H resize-left 2
 ### `server`
 
 `devtools server` is the server; the service manager runs it. `devtools server status` says whether it runs (exit 0) or not (exit 1, with the command that starts it); `devtools server restart` restarts the service, after asking when programs are running in it (`--yes` does not ask). A session survives a restart as its directory and layout; the programs in it start again.
+
+An update of devtools does not restart the server, so that it keeps the shells: the server goes on running the build it was started with until `devtools server restart`. `devtools server status` says when the server itself saw another build installed:
+
+```text
+running, pid 4242, version 0.1.0+6ee3170, protocol 1
+4 sessions, 9 panes, 2 windows
+socket /Users/me/.local/state/devtools/server.sock
+The server runs 0.1.0+6ee3170, but 0.1.0+04c5fef is installed.
+Run devtools server restart to start the installed one.
+```
+
+When only this devtools is another version than the server (a build of a worktree, say, or a server from before the watch, which says nothing), it says `The server runs 0.1.0+6ee3170, and this devtools is 0.1.0+04c5fef-dirty.` and no more: that is not a pending restart.
+
+`--json` prints the same as one object: `pid`, `version` (the server's), `gen`, `boot`, `sessions`, `panes`, `clients`, `socket`, and `cli_version` (this devtools), `installed` (the build the server saw installed, `""` when none, `unknown` for one whose version does not tell it from the running one), `restart_pending` (true when the server saw another build installed) and `cli_differs` (true when this devtools is another version than the server).
+
+The server notices an update itself: every 10 seconds it looks where the devtools it was started through (the one on the profile, a symlink that follows the active generation) points, and when that is another file than the one it runs it asks it for its version (a build that prints the running version, as two dirty builds of one commit do, is `unknown`). While an update waits for a restart, the status row of every devtools window shows `↑ update` in the right group, and `prefix ?` ends its hints with `↑ update installed, run devtools server restart`. Another machine whose server waits for a restart is marked `↑` after its name in the status row, and in the hub its heading says `update installed, restart pending`; the hub also names the version of another machine's server when it is not the one this machine's server runs, `macmini   0.1.0+6ee3170` say. A server or a client from before this works with one from after it in both directions; it just does not say any of this.
+
+### `version`
+
+Prints the version of this build: the Nix package's version and the commit it was built from, `0.1.0+04c5fef`, with `-dirty` when the tree had uncommitted changes. A `go build` in a checkout prints the commit alone, and a build without either `dev`. `devtools --version` prints the same.
+
+```sh
+devtools version
+```
 
 ### `bookmark`
 

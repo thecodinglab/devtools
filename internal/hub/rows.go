@@ -31,6 +31,10 @@ type machine struct {
 	// notes are the secondary lines under the machine's heading (Note,
 	// 3.5.3), in the order they arrived; the same note again is kept once
 	notes []note
+	// version is the version of the machine's server and installed the
+	// build installed there that waits for a restart of it (Online, Build)
+	version   string
+	installed string
 }
 
 // note is one secondary line of a machine: a path the catalog could not
@@ -155,6 +159,12 @@ func (m *Model) apply(ev Event) {
 			mc.notes = nil
 		}
 		mc.state, mc.problem = "online", Problem{}
+		mc.version, mc.installed = ev.Version, ev.Installed
+	case Build:
+		if ev.Version != "" {
+			mc.version = ev.Version
+		}
+		mc.installed = ev.Installed
 	case Items:
 		mc.loaded = true
 		for _, item := range ev.Items {

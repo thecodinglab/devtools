@@ -442,7 +442,7 @@ func TestEveryGatedFeatureOnEveryBackend(t *testing.T) {
 // noMultiplexer are the commands that reach no multiplexer (the test file
 // of P2-08b settles them): each runs with openBackend never called.
 var noMultiplexer = [][]string{
-	{"update"}, {"push"}, {"rebase"}, {"nuke"}, {"list"}, {"status"}, {"help"}, {"completion", "bash"},
+	{"update"}, {"push"}, {"rebase"}, {"nuke"}, {"list"}, {"status"}, {"help"}, {"completion", "bash"}, {"version"},
 }
 
 // directiveRows maps each directive of internal/config to its row.

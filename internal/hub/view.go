@@ -669,7 +669,25 @@ func nameBase(here, selected bool) seg {
 // sep, and its state phrase (5a.14.2).
 func (m *Model) machineHeading(mc *machine, w int) line {
 	phrase, failed := ui.MachinePhrase(mc.name, mc.state, ui.Problem(mc.problem), mc.online() && !mc.complete)
+	if mc.online() {
+		phrase = ui.WithBuild(ui.BuildPhrase(m.otherVersion(mc), mc.installed != ""), phrase)
+	}
 	return m.headingLine(mc.name, false, phrase, failed, w)
+}
+
+// otherVersion is the version of mc's server when it is another than the
+// one of this machine's server, "" when it is the same or either is not
+// known.
+func (m *Model) otherVersion(mc *machine) string {
+	for _, here := range m.machines {
+		if here.name == "" {
+			if here.version == "" || mc.version == here.version {
+				return ""
+			}
+			return mc.version
+		}
+	}
+	return ""
 }
 
 // headingLine is a machine heading: the chip of another machine at column 1,

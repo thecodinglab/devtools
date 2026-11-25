@@ -26,6 +26,15 @@
         src = self;
         vendorHash = "sha256-01DS/OhAUg+7F8wVXk/GcwTaIJ85g4/vl7UZzTH8xeo=";
       };
+
+      # The identity of the build that devtools version prints, that the
+      # server sends in its welcome and that server status compares: the
+      # version and the commit, e.g. 0.1.0+04c5fef, or 0.1.0+04c5fef-dirty
+      # for a tree with uncommitted changes. Only [A-Za-z0-9._-] and "+",
+      # the characters the XTVERSION answer keeps (internal/vt/engine.go).
+      # Stamped into the package only: checks.go-test builds the same source
+      # without it, so the tests see the fallback of an unstamped build.
+      buildVersion = "${goModule.version}+${self.shortRev or self.dirtyShortRev or "unknown"}";
     in
     {
       formatter = forAllSystems (
@@ -48,6 +57,8 @@
               pname = "devtools";
 
               subPackages = [ "cmd/devtools" ];
+
+              ldflags = [ "-X devtools/internal/cli.buildVersion=${buildVersion}" ];
 
               nativeBuildInputs = [ pkgs.pkg-config ];
               buildInputs = [ libghostty-vt ];

@@ -26,6 +26,7 @@ import (
 
 const (
 	maxHost     = 64
+	maxVersion  = 64
 	maxPath     = 4096 // bytes; a path longer than PATH_MAX is not a path
 	maxCatalog  = 2000
 	maxSessions = 500

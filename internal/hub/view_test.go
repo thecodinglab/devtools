@@ -857,3 +857,43 @@ func TestScrollingUpOntoAFeatureShowsItsProject(t *testing.T) {
 		t.Fatalf("the project is not above its selected feature:\n%s", strings.Join(rows, "\n"))
 	}
 }
+
+// The heading of another machine names the version of its server when it
+// is another than this machine's, and an update installed there that waits
+// for a restart; an unknown version of this machine shows none.
+func TestHubHeadingNamesTheBuildOfAnotherMachine(t *testing.T) {
+	look(t, "hub-headings-build-80", func(th ui.Theme) golden.Screen {
+		m := New(ModelOptions{Theme: th, Features: every})
+		feed(m, Event{Kind: Online, Version: "0.1.0+04c5fef"})
+		mc := func(version, installed string, complete bool) line {
+			return m.machineHeading(&machine{name: "macmini", state: "online", complete: complete, version: version, installed: installed}, 80)
+		}
+		heads := []line{
+			mc("0.1.0+04c5fef", "", true),              // the same build: nothing
+			mc("0.1.0+6ee3170", "", true),              // another build
+			mc("0.1.0+6ee3170", "", false),             // another build, still listing
+			mc("0.1.0+04c5fef", "0.1.0+abcdef0", true), // the same build, an update waits
+			mc("0.1.0+6ee3170", "unknown", true),       // both
+		}
+		c := screen.New(80, len(heads))
+		for y, h := range heads {
+			c.Styled(0, y, m.render(h, 80), 80)
+		}
+		return golden.Screen{Cols: 80, Rows: len(heads), Lines: c.Lines()}
+	})
+
+	m := New(ModelOptions{Features: every})
+	if got := m.otherVersion(&machine{name: "macmini", version: "0.1.0+6ee3170"}); got != "" {
+		t.Fatalf("without this machine's version the heading names %q", got)
+	}
+	feed(m, Event{Kind: Online, Version: "0.1.0+04c5fef"}, Event{Machine: "macmini", Kind: Online, Version: "0.1.0+6ee3170"},
+		Event{Machine: "macmini", Kind: Build, Installed: "0.1.0+abcdef0"})
+	mm := m.machines[len(m.machines)-1]
+	if mm.version != "0.1.0+6ee3170" || mm.installed != "0.1.0+abcdef0" || m.otherVersion(mm) != "0.1.0+6ee3170" {
+		t.Fatalf("macmini holds %q %q", mm.version, mm.installed)
+	}
+	feed(m, Event{Machine: "macmini", Kind: Build})
+	if mm.installed != "" || mm.version != "0.1.0+6ee3170" {
+		t.Fatalf("after the restart macmini holds %q %q", mm.version, mm.installed)
+	}
+}

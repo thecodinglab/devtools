@@ -495,7 +495,7 @@ func (f *Feed) describe() string {
 
 // EventName is the name of a hub event kind, for messages.
 func EventName(k hub.EventKind) string {
-	names := []string{"Connecting", "Online", "Items", "Git", "Complete", "Sessions", "Agents", "Failed", "Closed", "Note"}
+	names := []string{"Connecting", "Online", "Items", "Git", "Complete", "Sessions", "Agents", "Failed", "Closed", "Note", "Build"}
 	if int(k) >= 0 && int(k) < len(names) {
 		return names[k]
 	}

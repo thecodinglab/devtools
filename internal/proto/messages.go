@@ -165,6 +165,12 @@ type Welcome struct {
 	Pid     int      `json:"pid"`
 	Client  string   `json:"client"`  // "c" and a number
 	Clients int      `json:"clients"` // interactive connections, this one included
+	// Installed is the version of the build installed where the service
+	// starts the server, when that is another build than the one running:
+	// an update waits for a restart of the server. "unknown" when the
+	// installed build did not say its version; absent when none waits. A
+	// receiver that does not know the field ignores it (CapUpdate).
+	Installed string `json:"installed,omitempty"`
 }
 
 // Refuse refuses a hello; the server closes the connection after it.

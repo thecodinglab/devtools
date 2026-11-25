@@ -536,6 +536,8 @@ func (m *Model) chromeSummary() chrome.Summary {
 			Reason:  session.Sanitize(ms.Problem.Text, session.MaxText),
 			Agents:  map[string]int{},
 			Busy:    ms.Busy,
+
+			Installed: session.Sanitize(ms.Installed, session.MaxLabel),
 		}
 		if i == 0 && cm.Name == "" {
 			cm.Name = cm.Host

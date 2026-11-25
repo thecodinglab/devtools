@@ -6,6 +6,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -34,12 +35,24 @@ type Options struct {
 	ProcInterval  time.Duration // 1 s
 	FgInterval    time.Duration // 100 ms: foreground group of the focused pane of a displayed tab (3.2.1)
 
+	// The installed update (update.go). Program is the path the service
+	// starts the server through, the devtools of the profile, a symlink;
+	// Executable is the file of the running image, as the kernel names it
+	// (platform.RunningExecutable), never the symlink it was started by.
+	// Either "" watches nothing.
+	// InstalledVersion asks the build at a path for its version; nil runs
+	// "<path> version".
+	Program          string
+	Executable       string
+	UpdateInterval   time.Duration // 10 s
+	InstalledVersion func(ctx context.Context, path string) (string, error)
+
 	NewPane func(pane.Options) Pane // nil: pane.Start; tests of the core pass a fake
 	Log     *slog.Logger
 }
 
 // Defaults returns the production values of 5.3.6. StateDir, Shell, Env,
-// Version, Host, NewPane and Log stay zero: the caller (boot.Run) fills them.
+// Version, Host, Program, Executable, InstalledVersion, NewPane and Log stay zero: the caller (boot.Run) fills them.
 func Defaults() Options {
 	return Options{
 		History:       10000,
@@ -53,6 +66,8 @@ func Defaults() Options {
 		KillGrace:     250 * time.Millisecond,
 		ProcInterval:  time.Second,
 		FgInterval:    100 * time.Millisecond,
+
+		UpdateInterval: 10 * time.Second,
 	}
 }
 

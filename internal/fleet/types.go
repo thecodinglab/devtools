@@ -94,4 +94,10 @@ type MachineState struct {
 	Problem hub.Problem
 	Agents  map[agent.Status]int
 	Busy    int // agents that were not idle in the last snapshot; kept while State is "off"
+	// Version is welcome.version of the machine's server, sanitised; kept
+	// after the link is gone. Installed is what its server says is
+	// installed and waits for a restart of the server (welcome.installed,
+	// event.update): "" none, "unknown" a build that did not say its version.
+	Version   string
+	Installed string
 }

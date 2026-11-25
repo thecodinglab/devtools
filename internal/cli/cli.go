@@ -67,6 +67,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "devtools [--root PATH]... <command> [args]",
 		Short:         "Manage dev worktrees and their sessions",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -79,6 +80,8 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
+	// --version prints what devtools version prints
+	cmd.SetVersionTemplate("{{.Version}}\n")
 	cmd.PersistentFlags().StringArrayVar(&a.roots, "root", nil, "workspace root (repeatable; overrides DEVTOOLS_ROOT and config roots)")
 	cmd.AddCommand(
 		feature(featWork, newProjectCommand(a, stdout)),
@@ -104,6 +107,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		paneCommand(a, stdout),
 		serverCommand(a, stdout),
 		bridgeCommand(),
+		versionCommand(stdout),
 	)
 	return cmd
 }

@@ -428,7 +428,7 @@ func (m *DevtoolsMultiplexer) interactiveHello(version string) proto.Hello {
 	h := proto.Hello{
 		Gen:       proto.Gen,
 		Version:   version,
-		Caps:      []string{proto.CapCatalog, proto.CapAgents, proto.CapRoute, proto.CapStateGet, proto.CapTree},
+		Caps:      []string{proto.CapCatalog, proto.CapAgents, proto.CapRoute, proto.CapStateGet, proto.CapTree, proto.CapUpdate},
 		Kind:      proto.KindInteractive,
 		Ancestors: ancestors(),
 	}

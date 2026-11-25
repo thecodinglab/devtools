@@ -1,0 +1,21 @@
+size 80x5 cursor 0,0 hidden
+  macmini ────────────────────────────────────────────────────────────────────|
+  macmini   0.1.0+6ee3170 ────────────────────────────────────────────────────|
+  macmini   0.1.0+6ee3170, listing… ──────────────────────────────────────────|
+  macmini   update installed, restart pending ────────────────────────────────|
+  macmini   0.1.0+6ee3170, update installed, restart pending ─────────────────|
+styles
+0 1 9 bold p5 on #30323a
+0 10 68 p8
+1 1 9 bold p5 on #30323a
+1 12 13 #a6a8b0
+1 26 52 p8
+2 1 9 bold p5 on #30323a
+2 12 23 #a6a8b0
+2 36 42 p8
+3 1 9 bold p5 on #30323a
+3 12 33 #a6a8b0
+3 46 32 p8
+4 1 9 bold p5 on #30323a
+4 12 48 #a6a8b0
+4 61 17 p8

@@ -622,7 +622,7 @@ func TestServerCommandsOpenNoBackend(t *testing.T) {
 			if err := json.Unmarshal([]byte(r.stdout), &st); err != nil {
 				t.Fatalf("status --json = %q", r.stdout)
 			}
-			want := []string{"boot", "clients", "gen", "panes", "pid", "sessions", "socket", "version"}
+			want := []string{"boot", "cli_differs", "cli_version", "clients", "gen", "installed", "panes", "pid", "restart_pending", "sessions", "socket", "version"}
 			var keys []string
 			for k := range st {
 				keys = append(keys, k)

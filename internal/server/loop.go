@@ -48,6 +48,8 @@ type core struct {
 	scanning     bool
 	scanAgain    bool
 
+	installed string // welcome.installed: the version of another build installed, "" none (update.go)
+
 	saveDirty bool // a change since the last save was handed to the saver
 	saveArmed bool // a save is scheduled
 	final     bool // the stop took the state: nothing is saved any more

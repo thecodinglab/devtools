@@ -1,0 +1,6 @@
+size 80x5 cursor 0,0 hidden
+  macmini ────────────────────────────────────────────────────────────────────|
+  macmini   0.1.0+6ee3170 ────────────────────────────────────────────────────|
+  macmini   0.1.0+6ee3170, listing… ──────────────────────────────────────────|
+  macmini   update installed, restart pending ────────────────────────────────|
+  macmini   0.1.0+6ee3170, update installed, restart pending ─────────────────|

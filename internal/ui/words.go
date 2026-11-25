@@ -61,9 +61,11 @@ const (
 	SelectingBlock = "selecting block"
 	AnyKeyReturns  = "any key returns"
 
-	// the fleet strip: "{m} retrying", "{m} off"
+	// the fleet strip: "{m} retrying", "{m} off", and "↑ update" while
+	// this machine's server waits for a restart to run an installed update
 	FleetRetrying = "retrying"
 	FleetOff      = "off"
+	FleetUpdate   = "update"
 
 	// the scope bar
 	ScopeAll      = "all"
@@ -77,6 +79,10 @@ const (
 	HintSelect = "select"
 	HintCopy   = "copy"
 	HintLeave  = "leave"
+
+	// the hint of the update mark at the end of the hint strip: "↑ update
+	// installed, run devtools server restart"
+	HintUpdate = "update installed, run devtools server restart"
 
 	// hub hints: "⏎ switch", "⏎ create", "⏎ jump to pane", "⏎ merge",
 	// "⌃N new feature", "⌃G merge into main", "tab {next scope}",
@@ -181,6 +187,34 @@ func MachinePhrase(name, state string, p Problem, listing bool) (phrase string, 
 	}
 	// a reason this table does not know yet: said in its own words
 	return ReasonWord(p.Reason) + ".", true
+}
+
+// BuildPhrase is what the hub heading of an online machine says of the
+// build of its server: its version, when the hub shows it because it is
+// another than the one of this machine's server ("" leaves it out), and
+// "update installed, restart pending" while an update installed there waits
+// for a restart of the server. "" when there is nothing to say.
+func BuildPhrase(version string, pending bool) string {
+	parts := []string{}
+	if version != "" {
+		parts = append(parts, oneLine(version))
+	}
+	if pending {
+		parts = append(parts, "update installed, restart pending")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// WithBuild puts the build phrase before the machine phrase, a comma
+// between them when both say something.
+func WithBuild(build, phrase string) string {
+	switch {
+	case build == "":
+		return phrase
+	case phrase == "":
+		return build
+	}
+	return build + ", " + phrase
 }
 
 // unreachable is the phrase of a machine that did not answer.
@@ -513,6 +547,8 @@ var unsupportedPhrases = map[string]string{
 //	unknown      none
 //	notty        optionally the command ("attach" gives "devtools attach needs a terminal.")
 //	generation   the number of panes the restart ends
+//	drift        the server's version, the installed version ("unknown" when not known)
+//	otherbuild   the server's version, this devtools' version
 //	restart      the number of panes, the number of sessions
 //	no-client    none
 //	opened-only  the session's name
@@ -558,6 +594,15 @@ func Message(kind string, args ...string) string {
 	case "generation":
 		return "The devtools server is from another version of devtools.\n" +
 			"Restart it with: devtools server restart (this ends " + plural(arg(0), "pane", "panes") + ")"
+	case "drift":
+		installed := "another build"
+		if v := arg(1); v != "" && v != "unknown" {
+			installed = v
+		}
+		return "The server runs " + arg(0) + ", but " + installed + " is installed.\n" +
+			"Run devtools server restart to start the installed one."
+	case "otherbuild":
+		return "The server runs " + arg(0) + ", and this devtools is " + arg(1) + "."
 	case "restart":
 		return "Restart the devtools server? This ends " + plural(arg(0), "pane", "panes") +
 			" in " + plural(arg(1), "session", "sessions") + ". [y/N]"

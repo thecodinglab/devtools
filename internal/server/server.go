@@ -52,7 +52,7 @@ type Server struct {
 	saveMu   sync.Mutex // one write of state.json at a time
 	saveDone bool       // the synchronous save of the stop was written (guarded by saveMu)
 
-	wg sync.WaitGroup // the loop, the saver, the scan's ticker, every connection's goroutines
+	wg sync.WaitGroup // the loop, the saver, the scan's ticker, the watch of the installed build, every connection's goroutines
 }
 
 // New creates a server; it loads state.json (3.9). A file that does not
@@ -86,10 +86,11 @@ func New(o Options) (*Server, error) {
 		st = loaded
 	}
 	s.core = newCore(s, model.Load(st))
-	s.wg.Add(3)
+	s.wg.Add(4)
 	go s.loop()
 	go s.saver()
 	go s.ticker()
+	go s.watchInstall()
 	return s, nil
 }
 
@@ -105,6 +106,7 @@ func withDefaults(o Options) Options {
 		{&o.StallTimeout, &d.StallTimeout}, {&o.PingInterval, &d.PingInterval},
 		{&o.HelloTimeout, &d.HelloTimeout}, {&o.KillGrace, &d.KillGrace},
 		{&o.ProcInterval, &d.ProcInterval}, {&o.FgInterval, &d.FgInterval},
+		{&o.UpdateInterval, &d.UpdateInterval},
 	} {
 		if *f.v <= 0 {
 			*f.v = *f.def
