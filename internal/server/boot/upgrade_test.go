@@ -251,3 +251,25 @@ func TestTheDelayedKillEndsBeforeTheReap(t *testing.T) {
 		t.Fatal("the child was never reaped")
 	}
 }
+
+// The automatic upgrade is on by default; DEVTOOLS_AUTO_UPGRADE=0 in the
+// service's environment turns it off. The target policy stays the store's.
+func TestTheAutomaticUpgradeIsOnUnlessTurnedOff(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		set   bool
+		want  bool
+	}{{"", false, true}, {"1", true, true}, {"0", true, false}, {"no", true, true}} {
+		t.Setenv(envAuto, c.value)
+		if !c.set {
+			os.Unsetenv(envAuto)
+		}
+		t.Setenv(envForce, "")
+		r := execRun(t)
+		var o server.Options
+		r.upgradeOptions(&o)
+		if o.AutoUpgrade != c.want || o.Exec == nil || o.UpgradeTargetOK != nil || o.UpgradeForce {
+			t.Errorf("%s=%q (set %v): AutoUpgrade %v, want %v; target policy %v, force %v", envAuto, c.value, c.set, o.AutoUpgrade, c.want, o.UpgradeTargetOK != nil, o.UpgradeForce)
+		}
+	}
+}

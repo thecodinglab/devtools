@@ -511,3 +511,110 @@ func TestTheIdleWatchAndPastesDoNotRace(t *testing.T) {
 	c.Send(proto.Paste{Pane: p, Text: "!"})
 	c.WaitFor(p, hexOf("!"))
 }
+
+// A build the preflight of the automatic upgrade refuses (one that does not
+// even answer upgrade-check) is said in welcome.upgraded and recorded in the
+// journal, once: nothing was exec'd, and it is not checked again.
+func TestAnAutomaticRefusalIsToldAndJournaled(t *testing.T) {
+	in := newInstalled(t, "broken")
+	var mu sync.Mutex
+	var journaled []handover.Attempt
+	checks, execs := 0, 0
+	dir := testkit.ShortTempDir(t)
+	socket := servertest.Start(t, dir, servertest.WithLiveUpgrade(), servertest.WithOptions(func(o *server.Options) {
+		o.Program = in.link
+		o.AutoUpgrade = true
+		o.UpdateInterval, o.UpgradeSettle, o.UpgradeIdle, o.UpgradeEvery = 5*time.Millisecond, 20*time.Millisecond, time.Nanosecond, time.Millisecond
+		o.UpgradeTargetOK = func(p string) bool { return strings.HasPrefix(p, in.dir+"/") }
+		o.Check = func(ctx context.Context, path string, args []string) ([]byte, error) {
+			mu.Lock()
+			checks++
+			mu.Unlock()
+			return nil, errors.New("exit status 1")
+		}
+		o.Exec = func(h *server.Handover) error {
+			mu.Lock()
+			execs++
+			mu.Unlock()
+			return errors.New("exec: not in this test")
+		}
+		o.Journal = func(a handover.Attempt) error {
+			mu.Lock()
+			journaled = append(journaled, a)
+			mu.Unlock()
+			return nil
+		}
+	}))
+	testkit.Eventually(t, 10*time.Second, "the refusal is journaled", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(journaled) > 0
+	})
+	time.Sleep(200 * time.Millisecond) // many intervals of the watch and of the rate limit
+	mu.Lock()
+	defer mu.Unlock()
+	if checks != 1 || execs != 0 || len(journaled) != 1 {
+		t.Fatalf("%d checks, %d execs, journal %+v", checks, execs, journaled)
+	}
+	if a := journaled[0]; a.Target != in.path("broken") || a.Result != handover.Refused || !a.Auto || !strings.HasPrefix(a.Reason, "preflight: ") {
+		t.Fatalf("the journal's record %+v", a)
+	}
+	w, _, err := oneshotWelcome(socket)
+	if err != nil || w.Upgraded == nil || w.Upgraded.To != in.path("broken") || !strings.Contains(w.Upgraded.Error, "cannot take over") || w.Upgraded.Kept != 0 {
+		t.Fatalf("welcome.upgraded %+v (%v)", w.Upgraded, err)
+	}
+}
+
+// Input that comes while the automatic upgrade runs its preflight makes
+// that attempt not happen: the idle moment it waited for is checked again
+// when the model is held. A later idle moment upgrades.
+func TestInputDuringTheAutomaticPreflightPostponesIt(t *testing.T) {
+	in := newInstalled(t, "b")
+	var mu sync.Mutex
+	checks := 0
+	var execAt []int // checks run before each exec
+	var c *prototest.Client
+	var p string
+	ready := make(chan struct{})
+	dir := testkit.ShortTempDir(t)
+	socket := servertest.Start(t, dir, servertest.WithLiveUpgrade(), servertest.WithOptions(func(o *server.Options) {
+		o.Program = in.link
+		o.AutoUpgrade = true
+		o.UpdateInterval, o.UpgradeSettle, o.UpgradeIdle, o.UpgradeEvery = 5*time.Millisecond, 20*time.Millisecond, 300*time.Millisecond, time.Millisecond
+		o.UpgradeTargetOK = func(path string) bool { return strings.HasPrefix(path, in.dir+"/") }
+		check := o.Check
+		o.Check = func(ctx context.Context, path string, args []string) ([]byte, error) {
+			<-ready
+			mu.Lock()
+			checks++
+			first := checks == 1
+			mu.Unlock()
+			if first {
+				c.Send(proto.Paste{Pane: p, Text: "k"})
+				c.WaitFor(p, hexOf("k"))
+			}
+			return check(ctx, path, args)
+		}
+		o.Exec = func(h *server.Handover) error {
+			mu.Lock()
+			execAt = append(execAt, checks)
+			mu.Unlock()
+			return errors.New("exec: not in this test")
+		}
+	}))
+	c = prototest.Dial(t, socket, prototest.Interactive())
+	v := c.View(proto.ViewSet{Dir: dir, Name: "work", Cols: 80, Rows: 24})
+	p = v.Panes[0]
+	c.WaitFor(p, "ready")
+	close(ready)
+	testkit.Eventually(t, 20*time.Second, "an automatic exec", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(execAt) > 0
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if execAt[0] <= 2 {
+		t.Fatalf("the attempt whose preflight saw input went ahead (exec after %d checks)", execAt[0])
+	}
+}

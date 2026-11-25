@@ -102,6 +102,10 @@ type upgradeReq struct {
 	force bool
 	gens  []int
 	token *candidate // the automatic trigger's candidate, rechecked under hold
+	// idle is the time without input the automatic trigger waited for,
+	// checked again when the model is held (input may have come during
+	// the preflight); 0 after the hour of waiting, and for server.upgrade.
+	idle time.Duration
 }
 
 // upgradeError is the outcome of an attempt that changed nothing, with its
@@ -155,7 +159,7 @@ func (c *core) serverUpgrade(cn *conn, m proto.Msg) {
 		return
 	}
 	req := upgradeReq{cn: cn, id: m.ID, force: q.Force && s.o.UpgradeForce, gens: c.connectedGens(cn)}
-	if err := s.beginUpgrade(req); err != nil {
+	if _, err := s.beginUpgrade(req); err != nil {
 		var ue *upgradeError
 		errors.As(err, &ue)
 		c.Fail(cn, m.ID, ue.code, ue.text)
@@ -188,15 +192,16 @@ func unspoken(speaks, gens []int) []int {
 	return missing
 }
 
-// beginUpgrade starts an attempt unless one runs or the server stops.
-func (s *Server) beginUpgrade(req upgradeReq) error {
+// beginUpgrade starts an attempt unless one runs or the server stops; the
+// channel is closed when this attempt ended.
+func (s *Server) beginUpgrade(req upgradeReq) (<-chan struct{}, error) {
 	s.up.mu.Lock()
 	defer s.up.mu.Unlock()
 	if s.stopping.Load() {
-		return upgradeErr(proto.CodeBusy, "the server is stopping")
+		return nil, upgradeErr(proto.CodeBusy, "the server is stopping")
 	}
 	if s.up.running {
-		return upgradeErr(proto.CodeBusy, "an upgrade is in progress")
+		return nil, upgradeErr(proto.CodeBusy, "an upgrade is in progress")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.up.running, s.up.cancel, s.up.done = true, cancel, make(chan struct{})
@@ -212,7 +217,7 @@ func (s *Server) beginUpgrade(req upgradeReq) error {
 		s.up.running = false
 		s.up.mu.Unlock()
 	}()
-	return nil
+	return done, nil
 }
 
 // abortUpgrade cancels an attempt in progress and waits until it rolled
@@ -281,6 +286,9 @@ func (s *Server) upgrade(ctx context.Context, req upgradeReq) {
 	if err != nil {
 		s.log.Warn("upgrade: preflight refused", "target", target.Path, "err", err.Error())
 		s.noteRefusal(target.Path, err)
+		if req.token != nil {
+			s.autoRefused(ctx, target, check, err)
+		}
 		s.reply(req, nil, err)
 		return
 	}
@@ -533,6 +541,14 @@ func (s *Server) prepare(ctx context.Context, req upgradeReq, id string, target 
 			holdErr = upgradeErr(proto.CodeBusy, "the installed build changed again")
 			return
 		}
+		if req.idle > 0 {
+			for _, cn := range c.reg.list() {
+				if cn.kind == proto.KindInteractive && time.Since(cn.lastInput) < req.idle {
+					holdErr = upgradeErr(proto.CodeBusy, "a window had input again")
+					return
+				}
+			}
+		}
 		// The windows that are connected now are the ones that must come
 		// back: held, the loop admits no other until the rollback or the
 		// exec.
@@ -587,6 +603,11 @@ func (s *Server) prepare(ctx context.Context, req upgradeReq, id string, target 
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if s.o.UpgradeDelay != nil {
+		if err := s.o.UpgradeDelay(ctx, "freeze"); err != nil {
+			return fail(upgradeErr(proto.CodeBusy, "%v", err))
+		}
 	}
 
 	h := &Handover{Attempt: id, Target: target, Data: &handover.Writer{}}

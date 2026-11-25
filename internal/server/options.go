@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	"devtools/internal/handover"
 	"devtools/internal/pane"
 	"devtools/internal/platform"
 	"devtools/internal/vt"
@@ -61,8 +62,9 @@ type Options struct {
 	// Check runs the installed build's upgrade-check; nil: platform.RunCheck
 	// with Env.
 	Check func(ctx context.Context, path string, args []string) ([]byte, error)
-	// The automatic upgrade (autoupgrade.go): off unless AutoUpgrade. It
-	// takes its candidate from the watch of the installed build.
+	// The automatic upgrade (autoupgrade.go): off unless AutoUpgrade, which
+	// boot sets unless DEVTOOLS_AUTO_UPGRADE=0. It takes its candidate from
+	// the watch of the installed build.
 	AutoUpgrade     bool
 	UpgradeSettle   time.Duration          // 30 s: how long a new build must stay before it is taken
 	UpgradeIdle     time.Duration          // 3 s without input on any window
@@ -71,6 +73,15 @@ type Options struct {
 	// Force makes server.upgrade go ahead with the running build itself
 	// (tests); a request's force needs it too.
 	UpgradeForce bool
+	// Journal records an attempt in the journal of the live upgrades
+	// (boot's writer); the automatic upgrade records there a build the
+	// preflight refused. nil: nothing is recorded.
+	Journal func(handover.Attempt) error
+	// UpgradeDelay is called at a phase of an attempt ("freeze": every
+	// pane frozen, the model held) and returns when it may go on, or the
+	// error that rolls it back (the context ended). Only the e2e tests set
+	// it, to stop the service at that moment.
+	UpgradeDelay func(ctx context.Context, phase string) error
 }
 
 // Defaults returns the production values of 5.3.6. StateDir, Shell, Env,

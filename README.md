@@ -333,7 +333,7 @@ bind alt+H resize-left 2
 
 `devtools server` is the server; the service manager runs it. `devtools server status` says whether it runs (exit 0) or not (exit 1, with the command that starts it), how its last upgrade went, and whether another build is installed.
 
-An update of devtools does not restart the server on its own, so that it keeps the shells: the server goes on running the build it was started with until `devtools server restart` upgrades it live (below). `devtools server status` says when the server itself saw another build installed:
+An update of devtools does not restart the server, so that it keeps the shells: the server upgrades itself live to the installed build (below), or `devtools server restart` does it at once. `devtools server status` says when the server itself saw another build installed:
 
 ```text
 running, pid 4242, version 0.1.0+6ee3170, protocol 1
@@ -360,9 +360,20 @@ The server notices an update itself: every 10 seconds it looks where the devtool
 
 What a live upgrade does not carry: the connections of the windows (they reconnect), the environment of the service (an environment change in `programs.devtools.server.environment` needs `--cold`), a bell or a clipboard write of the moment of the handover, and, on macOS, the last output of a program that ends in the fraction of a second the new build takes to start. The first upgrade from a build without the live upgrade restarts the programs. A libghostty update that changes its snapshot format cannot be taken over live; restart says so and offers `--cold`.
 
-The server can also upgrade itself once the watch above sees a new devtools installed: the build must be in the Nix store and stay the same file for 30 seconds, and the server waits for a moment in which no window had input for 3 seconds (at most an hour), at most once in 10 minutes, and never tries a build again whose last attempt failed. It upgrades to exactly the file the watch saw, and not at all when the profile moved on meanwhile. It is off by default; `DEVTOOLS_AUTO_UPGRADE=1` in `programs.devtools.server.environment` turns it on.
+The server also upgrades itself, live, once the watch above sees a new devtools installed, so a `home-manager switch` is all an update needs: the build must be in the Nix store and stay the same file for 30 seconds, and the server waits for a moment in which no window had input for 3 seconds (at most an hour), at most once in 10 minutes, and never tries a build again whose last attempt failed. It upgrades to exactly the file the watch saw, and not at all when the profile moved on meanwhile. This is on by default; to turn it off, and upgrade only with `devtools server restart`, set it in the service's environment and restart the service once (`devtools server restart --cold`), since a live upgrade keeps the old environment:
 
-Every attempt is recorded in `upgrade.json` in the state directory. A new build that crashes after the handover is recorded as crashed at the next start and never tried automatically again. A build that crashes at every start makes the service manager restart it in a loop, as a broken build does after `--cold`: switch the profile back (`home-manager switch --rollback`, or the previous generation) and the next start runs the old build.
+```nix
+programs.devtools.server.environment.DEVTOOLS_AUTO_UPGRADE = "0";
+```
+
+Every attempt is recorded in `upgrade.json` in the state directory, and `devtools server status` says how the last one went. What a broken build does:
+
+- it does not start, or cannot read this server's terminals: the server asks it first (`server upgrade-check`), refuses it, keeps running with every program, and says so in `server status`; it does not try that build again;
+- it takes over and then gives the process back (it cannot adopt the programs): the old build runs again in the same process with every program;
+- it takes over and then crashes, in its first minute: the programs end with the process, and the service manager starts the profile's devtools again, that same build; the sessions come back as after `--cold` (their layout and directories, new shells). The attempt is recorded as crashed, and the automatic upgrade never takes that build again;
+- it crashes at every start: the service manager restarts it for as long as it crashes (launchd every 10 seconds; systemd after 1 second, growing to 10, without a start limit), as a broken build does after `--cold`. The recovery is to switch the profile back (`home-manager switch --rollback`, or the previous generation): the manager's next start runs the old build, which records the attempt as crashed and does not take the broken build again.
+
+A change to the service itself, the unit or the agent the home-manager module writes, reaches the server on its own too. On Linux the unit is never restarted by a switch (`X-SwitchMethod = keep-old`); the switch's daemon-reload hands the new restart and stop settings to the running unit. On macOS home-manager replaces a changed agent, which restarts the server and its programs, as `--cold` does. An environment change (`programs.devtools.server.environment`) needs that restart on Linux too: `devtools server restart --cold`.
 
 ### `version`
 

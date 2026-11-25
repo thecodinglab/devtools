@@ -108,6 +108,9 @@ in
           ++ expect "launchd KeepAlive" s.launchd.KeepAlive true
           ++ expect "launchd RunAtLoad" s.launchd.RunAtLoad true
           ++ expect "launchd Label" s.launchd.Label "org.nix-community.home.devtools-server"
+          ++ expect "launchd ExitTimeOut" s.launchd.ExitTimeOut s.systemd.Service.TimeoutStopSec
+          ++ expect "systemd StartLimitIntervalSec" s.systemd.Unit.StartLimitIntervalSec 0
+          ++ expect "systemd RestartMaxDelaySec" s.systemd.Service.RestartMaxDelaySec 10
           ++ expect "launchd ProgramArguments" s.launchd.ProgramArguments [
             f.program
             "server"

@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -40,13 +41,15 @@ const healthAfter = 60 * time.Second
 // The variables of the tests of the live upgrade, honoured only with
 // DEVTOOLS_UPGRADE_FORCE=1 (e2e).
 const (
-	envAuto      = "DEVTOOLS_AUTO_UPGRADE"       // 1: the automatic upgrade is on (default off)
+	envAuto      = "DEVTOOLS_AUTO_UPGRADE"       // 0: the automatic upgrade is off (default on); not a test knob
 	envForce     = "DEVTOOLS_UPGRADE_FORCE"      // 1: server restart --force may upgrade to the running build
 	envSettle    = "DEVTOOLS_UPGRADE_SETTLE"     // the settle time of the automatic upgrade
 	envInterval  = "DEVTOOLS_UPGRADE_INTERVAL"   // how often the watch of the installed build looks
 	envIdle      = "DEVTOOLS_UPGRADE_IDLE"       // the idle time it waits for
 	envTargetDir = "DEVTOOLS_UPGRADE_TARGET_DIR" // the automatic upgrade may take builds in this directory
 	envFailAdopt = "DEVTOOLS_UPGRADE_FAIL_ADOPT" // 1: the new image refuses to adopt; both: the old one too
+	envCrash     = "DEVTOOLS_UPGRADE_CRASH"      // <version>: an image of that version crashes a second after it adopted
+	envDelay     = "DEVTOOLS_UPGRADE_DELAY"      // <phase>:<duration>: the attempt waits that long at the phase (testDelay)
 )
 
 var errStopping = errors.New("the server is stopping")
@@ -79,11 +82,27 @@ func (r *run) upgradeOptions(o *server.Options) {
 		return
 	}
 	o.Exec = r.exec
-	o.AutoUpgrade = os.Getenv(envAuto) == "1"
+	o.Journal = r.journal
+	// On unless the service's environment turns it off: the startup-crash
+	// tests under disposable launchd and systemd jobs (internal/e2e/
+	// service_test.go) gate this default.
+	o.AutoUpgrade = os.Getenv(envAuto) != "0"
 	if os.Getenv(envForce) != "1" {
 		return
 	}
 	o.UpgradeForce = true
+	o.UpgradeDelay = func(ctx context.Context, phase string) error {
+		d := r.testDelay(phase)
+		if d == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+			return nil
+		}
+	}
 	for name, d := range map[string]*time.Duration{envSettle: &o.UpgradeSettle, envInterval: &o.UpdateInterval, envIdle: &o.UpgradeIdle} {
 		if v, err := time.ParseDuration(os.Getenv(name)); err == nil && v > 0 {
 			*d = v
@@ -123,6 +142,41 @@ func absArgv0(argv0 string) string {
 		}
 	}
 	return ""
+}
+
+// testDelay is how long an attempt waits at phase, by DEVTOOLS_UPGRADE_DELAY
+// (honoured only with DEVTOOLS_UPGRADE_FORCE=1, e2e): "freeze" (the old
+// image, every pane frozen), "exec" (the old image, the attempt accepted,
+// a stop still wins), "boundary" (the old image, after the reset of the
+// stop signals: a stop ends the process), "stage" (the new image, before
+// it stages anything). It logs the wait, so that a test knows it began.
+func (r *run) testDelay(phase string) time.Duration {
+	if os.Getenv(envForce) != "1" {
+		return 0
+	}
+	p, v, ok := strings.Cut(os.Getenv(envDelay), ":")
+	if !ok || p != phase {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	r.log.Info("upgrade: waiting, as "+envDelay+" says", "phase", phase, "for", d.String())
+	return d
+}
+
+// maxRSS is the peak resident size of this process so far, in bytes
+// (getrusage; it counts the image before an exec too on Linux).
+func maxRSS() int64 {
+	var ru syscall.Rusage
+	if syscall.Getrusage(syscall.RUSAGE_SELF, &ru) != nil {
+		return 0
+	}
+	if runtime.GOOS == "darwin" {
+		return int64(ru.Maxrss)
+	}
+	return int64(ru.Maxrss) << 10
 }
 
 // selfExecutable is platform.SelfExecutable; the tests replace it.
@@ -235,6 +289,9 @@ func (r *run) execStep(h *server.Handover, sigs chan os.Signal) (error, os.Signa
 	}
 
 	h.Accept()
+	if d := r.testDelay("exec"); d > 0 {
+		time.Sleep(d)
+	}
 
 	// The boundary: from the reset on, a SIGTERM or SIGINT ends the process
 	// at once (the residual window up to the new image's signal.Notify); one
@@ -252,9 +309,16 @@ func (r *run) execStep(h *server.Handover, sigs chan os.Signal) (error, os.Signa
 			return fail(err)
 		}
 	}
+	if d := r.testDelay("boundary"); d > 0 {
+		time.Sleep(d)
+	}
 	argv := []string{r.argv0, "server"}
 	envv := append(withoutHandover(os.Environ()), handover.EnvVar+"="+env.String())
-	r.log.Info("upgrade: exec", "attempt", h.Attempt, "target", h.Target.Path, "panes", len(h.Masters))
+	var size int64
+	if fi, err := payload.Stat(); err == nil {
+		size = fi.Size()
+	}
+	r.log.Info("upgrade: exec", "attempt", h.Attempt, "target", h.Target.Path, "panes", len(h.Masters), "bytes", size, "maxrss", maxRSS())
 	err = execKeeping(h.Target.Path, argv, envv, keep)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	runtime.KeepAlive(payload)
@@ -414,7 +478,13 @@ func (r *run) adopt(v string, sigs chan os.Signal) int {
 		r.healthy = time.AfterFunc(healthAfter, func() {
 			r.journal(handover.Attempt{ID: env.ID, Result: handover.OK})
 		})
-		r.log.Info("upgrade: adopted", "attempt", env.ID, "panes", staged.Panes(), "version", r.version)
+		r.log.Info("upgrade: adopted", "attempt", env.ID, "panes", staged.Panes(), "version", r.version, "maxrss", maxRSS())
+		if v := os.Getenv(envCrash); v != "" && v == r.version && os.Getenv(envForce) == "1" {
+			// The fault of the e2e tests: a build that takes over and then
+			// crashes before its health interval. A cold start of it works.
+			r.log.Error("upgrade: crashing in a second, as "+envCrash+" says", "attempt", env.ID)
+			time.AfterFunc(time.Second, func() { panic("e2e: " + envCrash + "=" + v) })
+		}
 	}
 	r.log.Info("listening", "socket", r.socket, "version", r.version, "pid", os.Getpid())
 	return r.serve(srv, newPeerListener(inv.ln, ownUID(), peerUID, r.log), sigs)
@@ -502,6 +572,9 @@ func (r *run) stage(in *inherited) (st *server.Staged, err error) {
 			return nil, fmt.Errorf("pane %s: descriptor %d outside the range %d-%d", p.ID, p.Master, env.Lo, env.Hi)
 		}
 		in.masters[p.Master] = in.file(p.Master, "/dev/ptmx")
+	}
+	if d := r.testDelay("stage"); d > 0 {
+		time.Sleep(d)
 	}
 	if err := r.environment(); err != nil {
 		return nil, err

@@ -107,6 +107,13 @@ func newUpgradeScene(t *testing.T, env ...string) upgradeScene {
 			t.Logf("server log:\n%s", m.ServerLog())
 		}
 	})
+	return sceneOn(t, m)
+}
+
+// sceneOn builds the scene of newUpgradeScene on a machine whose server
+// runs (under the harness or a service manager).
+func sceneOn(t *testing.T, m *Machine) upgradeScene {
+	t.Helper()
 	project(t, m, "alpha")
 	x := openSession(t, m, plain(m, 100, 30), "alpha")
 	x.Type("echo before-left-$((6*7))\r")
@@ -300,7 +307,8 @@ func TestLiveUpgradeSameBuildForced(t *testing.T) {
 
 func TestLiveUpgradeAutomatic(t *testing.T) {
 	needV2(t)
-	s := newUpgradeScene(t, "DEVTOOLS_UPGRADE_FORCE=1", "DEVTOOLS_AUTO_UPGRADE=1",
+	// The automatic upgrade is on by default: no DEVTOOLS_AUTO_UPGRADE.
+	s := newUpgradeScene(t, "DEVTOOLS_UPGRADE_FORCE=1",
 		"DEVTOOLS_UPGRADE_SETTLE=1s", "DEVTOOLS_UPGRADE_INTERVAL=200ms", "DEVTOOLS_UPGRADE_IDLE=500ms",
 		"DEVTOOLS_UPGRADE_TARGET_DIR="+filepath.Dir(binaryV2))
 	installBuild(t, s.m, binaryV2)

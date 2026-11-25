@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -132,7 +134,11 @@ func (u *autoUpgrade) look(found *candidate) {
 	}
 	s.log.Info("upgrade: a new build is installed; upgrading", "target", c.id.Path)
 	started := time.Now().UnixMilli()
-	done, err := s.beginUpgradeWait(upgradeReq{token: c})
+	req := upgradeReq{token: c}
+	if idle >= u.policy.idle {
+		req.idle = u.policy.idle // not the hour's override: still idle when held
+	}
+	done, err := s.beginUpgrade(req)
 	if err != nil {
 		return
 	}
@@ -184,17 +190,6 @@ func (s *Server) idleFor() time.Duration {
 	return time.Since(last)
 }
 
-// beginUpgradeWait starts an attempt of the automatic trigger and returns
-// a channel closed when it ended.
-func (s *Server) beginUpgradeWait(req upgradeReq) (<-chan struct{}, error) {
-	if err := s.beginUpgrade(req); err != nil {
-		return nil, err
-	}
-	s.up.mu.Lock()
-	defer s.up.mu.Unlock()
-	return s.up.done, nil
-}
-
 // noteRefusal records that the preflight refused a target, for the
 // automatic trigger.
 func (s *Server) noteRefusal(path string, err error) {
@@ -208,6 +203,29 @@ func (s *Server) noteRefusal(path string, err error) {
 		s.up.refused = map[string]bool{}
 	}
 	s.up.refused[path] = true
+}
+
+// autoRefused tells about a build the preflight of the automatic upgrade
+// refused (one that does not even start says nothing anyone would see
+// otherwise): welcome.upgraded, which server status prints, and the
+// journal (refused), whose record keeps the automatic upgrade from trying
+// it again after a restart too. Nothing was frozen or exec'd.
+func (s *Server) autoRefused(ctx context.Context, target platform.Identity, check handover.Check, err error) {
+	var ue *upgradeError
+	if !errors.As(err, &ue) || ue.code != proto.CodeIncompatible || ctx.Err() != nil {
+		return // not the build's answer: the server stops
+	}
+	to := check.Version
+	if to == "" {
+		to = target.Path
+	}
+	id := newAttemptID()
+	now := time.Now().UnixMilli()
+	text := "the installed build cannot take over: " + ue.text
+	s.setLast(proto.Upgraded{ID: id, From: s.o.Version, To: to, At: now, Error: text})
+	if s.o.Journal != nil {
+		s.o.Journal(handover.Attempt{ID: id, Target: target.Path, From: s.o.Version, To: to, Pid: os.Getpid(), Result: handover.Refused, Reason: "preflight: " + strings.ReplaceAll(ue.text, "\n", " "), Auto: true})
+	}
 }
 
 func (s *Server) lastRefusal(path string) bool {

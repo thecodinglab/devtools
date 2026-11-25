@@ -37,12 +37,23 @@ in
       # Not restarted on activation (hm:modules/systemd.nix:160-172), so a
       # switch never ends the shells of the running server.
       X-SwitchMethod = "keep-old";
+      # No start limit: a build that crashes at every start (the server
+      # upgrades itself to whatever the profile installs) is retried for as
+      # long as it crashes, so switching the profile back recovers on its
+      # own, as under launchd. systemd's default gives up after five starts
+      # in ten seconds and leaves the unit failed. Unit settings reach the
+      # running unit at the daemon-reload of a switch, without a restart.
+      StartLimitIntervalSec = 0;
     };
     Install.WantedBy = [ "default.target" ];
     Service = {
       ExecStart = "${program} server";
       Restart = "always";
+      # The first restart after 1 s, growing to 10 s (launchd's throttle)
+      # over three restarts, so a crash loop does not spin.
       RestartSec = 1;
+      RestartSteps = 3;
+      RestartMaxDelaySec = 10;
       # SIGTERM to the server only; it ends its panes in order.
       KillMode = "mixed";
       TimeoutStopSec = 10;
@@ -68,6 +79,10 @@ in
     KeepAlive = true;
     # Keeps macOS from throttling the process that holds every terminal.
     ProcessType = "Interactive";
+    # SIGKILL 10 s after SIGTERM, as systemd's TimeoutStopSec: launchd's
+    # default is 5 s, no more than the server's own shutdown watchdog, so a
+    # slow orderly stop would be killed before it ended its panes.
+    ExitTimeOut = 10;
     # The server runs git for the catalog, and launchd's default PATH has no
     # Nix profile. provisional E7: whether launchd sets SHELL for an agent is
     # pending [GO] (the Mac half of E7); SHELL comes from server.environment

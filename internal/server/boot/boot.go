@@ -183,6 +183,11 @@ func (r *run) start(sigs chan os.Signal) int {
 	handover.Update(r.stateDir, func(j *handover.Journal) {
 		if a, ok := j.ColdStart(time.Now().UnixMilli()); ok {
 			r.log.Error("upgrade: the last live upgrade did not survive", "attempt", a.ID, "target", a.Target, "reason", a.Reason)
+			// server status says it too: the programs of that upgrade
+			// ended with it, and this start is a cold one.
+			if r.upgrade == nil {
+				r.upgrade = &proto.Upgraded{ID: a.ID, From: a.From, To: a.To, At: a.At, Error: "the new build ended: " + a.Reason, Cold: true}
+			}
 		}
 	})
 

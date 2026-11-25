@@ -25,6 +25,10 @@ const (
 	Failed    = "failed"    // the exec failed; the old image rolled back
 	Fallback  = "fallback"  // the new image could not adopt; the old one took over again
 	Cold      = "cold"      // neither could adopt; the server started cold
+	// Refused is a build the preflight of the automatic upgrade refused:
+	// nothing was frozen or exec'd. It is no handover, so ColdStart looks
+	// past it.
+	Refused = "refused"
 )
 
 // Attempt is one live upgrade.
@@ -120,7 +124,8 @@ func (j Journal) Last() (Attempt, bool) {
 }
 
 // Blocked reports whether the automatic upgrade must not try target again:
-// the newest attempt to it crashed, failed, fell back or ended cold.
+// the newest attempt to it crashed, failed, fell back, ended cold or was
+// refused by the preflight.
 func (j Journal) Blocked(target string) bool {
 	for i := len(j.Attempts) - 1; i >= 0; i-- {
 		a := j.Attempts[i]
@@ -128,7 +133,7 @@ func (j Journal) Blocked(target string) bool {
 			continue
 		}
 		switch a.Result {
-		case Crashed, Failed, Fallback, Cold:
+		case Crashed, Failed, Fallback, Cold, Refused:
 			return true
 		}
 		return false
@@ -152,7 +157,16 @@ func (j Journal) LastAuto() int64 {
 // journal: an attempt left pending or committed did not reach its health
 // interval, so the process ended: it crashed.
 func (j *Journal) ColdStart(now int64) (Attempt, bool) {
-	a, ok := j.Last()
+	// the newest handover: a refusal of the preflight recorded after it (a
+	// later candidate, while the adopted image ran) is none
+	var a Attempt
+	ok := false
+	for i := len(j.Attempts) - 1; i >= 0; i-- {
+		if j.Attempts[i].Result != Refused {
+			a, ok = j.Attempts[i], true
+			break
+		}
+	}
 	if !ok || (a.Result != Pending && a.Result != Committed) {
 		return Attempt{}, false
 	}
@@ -177,5 +191,5 @@ func Update(dir string, f func(*Journal)) error {
 // Failure reports whether a result says the attempt did not keep the
 // programs in the new build.
 func Failure(result string) bool {
-	return strings.Contains("|"+Crashed+"|"+Failed+"|"+Fallback+"|"+Cold+"|", "|"+result+"|")
+	return strings.Contains("|"+Crashed+"|"+Failed+"|"+Fallback+"|"+Cold+"|"+Refused+"|", "|"+result+"|")
 }

@@ -259,7 +259,18 @@ func TestJournalRules(t *testing.T) {
 	if _, ok := j.ColdStart(7); ok {
 		t.Errorf("ok then cold counted as a crash")
 	}
-	for _, r := range []string{Failed, Fallback, Cold} {
+	// A refusal of the preflight recorded while an adopted image ran (a
+	// later candidate) is no handover: the cold start still finds the
+	// committed attempt before it and marks it crashed.
+	j.Put(Attempt{ID: "a4", Target: "/nix/store/e", Result: Committed})
+	j.Put(Attempt{ID: "r1", Target: "/nix/store/f", Result: Refused})
+	if a, ok := j.ColdStart(8); !ok || a.ID != "a4" || a.Result != Crashed {
+		t.Errorf("committed, refused, then cold: %+v %v", a, ok)
+	}
+	if r, _ := j.Get("r1"); r.Result != Refused || !j.Blocked("/nix/store/f") || !j.Blocked("/nix/store/e") {
+		t.Errorf("after the cold start: %+v, blocked f %v, e %v", r, j.Blocked("/nix/store/f"), j.Blocked("/nix/store/e"))
+	}
+	for _, r := range []string{Failed, Fallback, Cold, Refused} {
 		j.Put(Attempt{ID: "x" + r, Target: "/t/" + r, Result: r})
 		if !j.Blocked("/t/" + r) {
 			t.Errorf("%s does not block", r)

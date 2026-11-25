@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -247,6 +248,11 @@ func RunCheck(ctx context.Context, path string, args, env []string, limit int) (
 	cmd.Stdout = out
 	cmd.Stderr = &errOut
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// At the deadline the whole session goes, and a child left holding
+	// the output pipes cannot keep the caller (the watch of the installed
+	// build) waiting.
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = time.Second
 	err := cmd.Run()
 	if err != nil {
 		line, _, _ := strings.Cut(strings.TrimSpace(errOut.b.String()), "\n")

@@ -43,6 +43,11 @@ type machineState struct {
 	server *proc
 	terms  []int    // pids of the programs started in a Term of this machine
 	env    []string // AddEnv
+
+	// A server a service manager runs (service_test.go) instead of the
+	// harness: its pid and its log, from the manager.
+	svcPid func() int
+	svcLog func() string
 }
 
 func (m *Machine) state() *machineState {
@@ -380,6 +385,13 @@ func (m *Machine) Start() {
 // ServerLog returns what the server wrote to its standard output and
 // error.
 func (m *Machine) ServerLog() string {
+	s := m.state()
+	s.mu.Lock()
+	svc := s.svcLog
+	s.mu.Unlock()
+	if svc != nil {
+		return svc()
+	}
 	b, _ := os.ReadFile(m.fakeDir("server.log"))
 	return string(b)
 }
@@ -387,6 +399,12 @@ func (m *Machine) ServerLog() string {
 // ServerPid returns the pid of the running server, 0 when none runs.
 func (m *Machine) ServerPid() int {
 	s := m.state()
+	s.mu.Lock()
+	svc := s.svcPid
+	s.mu.Unlock()
+	if svc != nil {
+		return svc()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.server == nil || s.server.exited() {

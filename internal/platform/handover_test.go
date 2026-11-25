@@ -220,6 +220,18 @@ func TestRunCheckCapsAndReportsAFailure(t *testing.T) {
 	if _, err := RunCheck(short, "/bin/sh", []string{"-c", "sleep 5"}, nil, 64); err == nil || time.Since(start) > 3*time.Second {
 		t.Errorf("RunCheck past its context: %v after %v", err, time.Since(start))
 	}
+	// A child left holding the output (a broken build that starts
+	// something and exits, or waits for it) does not keep it past the
+	// deadline either.
+	for _, script := range []string{"sleep 5 & sleep 5", "(sleep 5 &); exit 0"} {
+		short, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		start := time.Now()
+		RunCheck(short, "/bin/sh", []string{"-c", script}, nil, 64)
+		cancel()
+		if d := time.Since(start); d > 3*time.Second {
+			t.Errorf("RunCheck of %q returned after %v", script, d)
+		}
+	}
 }
 
 func TestServicePidParsesBothManagers(t *testing.T) {
