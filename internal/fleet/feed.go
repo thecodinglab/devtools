@@ -72,12 +72,17 @@ func (f *Fleet) openHub(p *hubQueue) {
 		switch {
 		case mc.online():
 			f.hubOnline(mc)
-		case mc.dialing:
-			f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Connecting})
-		case mc.status == "attention" && now.Sub(mc.lastTry) < attentionGap:
+		case !mc.dialing && mc.status == "attention" && !loginHelps(mc) && now.Sub(mc.lastTry) < attentionGap:
 			f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Failed, Err: mc.problem})
 		default:
-			f.dial(mc)
+			// opening the hub is the user's presence: its dial may log in
+			// (3.5.2), and is the retry the words of auth and login ask for
+			f.grantLogin(mc, userGrant)
+			if mc.dialing {
+				f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Connecting})
+			} else {
+				f.dial(mc)
+			}
 		}
 	}
 }

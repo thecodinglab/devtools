@@ -11,18 +11,21 @@ import (
 )
 
 // Dialer is a fake remote.Dialer: every machine of a Rig answers its dials
-// as its script says. It records every name it is asked for.
+// as its script says. It records every name it is asked for, and whether
+// the dial could log in.
 type Dialer struct {
 	mu       sync.Mutex
 	machines map[string]*Machine
 	names    []string
+	logins   []bool
 }
 
 // Dial answers with the next step of the machine's script. A dial that
 // finds no step waits for the next one the test scripts, or for ctx.
-func (d *Dialer) Dial(ctx context.Context, name string) (remote.Link, *remote.Failure) {
+func (d *Dialer) Dial(ctx context.Context, name string, login bool) (remote.Link, *remote.Failure) {
 	d.mu.Lock()
 	d.names = append(d.names, name)
+	d.logins = append(d.logins, login)
 	m := d.machines[name]
 	d.mu.Unlock()
 	if m == nil {
@@ -30,6 +33,7 @@ func (d *Dialer) Dial(ctx context.Context, name string) (remote.Link, *remote.Fa
 	}
 	m.mu.Lock()
 	m.dials++
+	m.logins = append(m.logins, login)
 	m.mu.Unlock()
 	var s step
 	select {
@@ -61,6 +65,13 @@ func (d *Dialer) Names() []string {
 	return append([]string(nil), d.names...)
 }
 
+// Logins is the login flag of every dial, in the order of Names.
+func (d *Dialer) Logins() []bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]bool(nil), d.logins...)
+}
+
 // step is one answer to a dial.
 type step struct {
 	snap  proto.Snapshot
@@ -78,6 +89,7 @@ type Machine struct {
 	mu      sync.Mutex
 	welcome proto.Welcome
 	dials   int
+	logins  []bool // the login flag of each dial
 	sent    []proto.Msg
 	live    *Link
 	links   int
@@ -205,6 +217,14 @@ func (m *Machine) Dials() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.dials
+}
+
+// DialLogins is the login flag of every dial of this machine, in order:
+// whether the dial could start a new ssh login.
+func (m *Machine) DialLogins() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]bool(nil), m.logins...)
 }
 
 // Links is how many links were made to this machine.

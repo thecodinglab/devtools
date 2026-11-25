@@ -28,6 +28,9 @@ type linkFile struct {
 	Root    string `json:"root"`  // the machine directory of b
 	Block   string `json:"block"` // a reason of 3.5.2, "" for none
 	DelayMs int64  `json:"delay_ms"`
+	// Shared: the shared connection of the alias (3.5.2) is up, so
+	// "-O check" answers 0 and a bridge over it needs no login.
+	Shared bool `json:"shared"`
 }
 
 // validAlias is the alias rule of 3.5.1.
@@ -89,17 +92,24 @@ func linkPath(root, alias string) string {
 // write changes the link file under its lock.
 func (l *Link) write(change func(*linkFile)) {
 	l.t.Helper()
-	unlock, err := lockFile(l.path() + ".lock")
-	if err != nil {
+	if err := changeLink(l.a.Root(), l.alias, change); err != nil {
 		l.t.Fatalf("e2e: link %s: %v", l.alias, err)
+	}
+}
+
+// changeLink changes the link file of alias on the machine in root under
+// its lock; the fake ssh changes it too, in its own process.
+func changeLink(root, alias string, change func(*linkFile)) error {
+	path := linkPath(root, alias)
+	unlock, err := lockFile(path + ".lock")
+	if err != nil {
+		return err
 	}
 	defer unlock()
-	f, _ := readLink(l.a.Root(), l.alias)
+	f, _ := readLink(root, alias)
 	change(&f)
 	b, _ := json.Marshal(f)
-	if err := os.WriteFile(l.path(), b, 0o600); err != nil {
-		l.t.Fatalf("e2e: link %s: %v", l.alias, err)
-	}
+	return os.WriteFile(path, b, 0o600)
 }
 
 // readLink reads the link file of alias on the machine in root.
@@ -143,6 +153,34 @@ func (l *Link) Cut() {
 	}
 }
 
+// Shared reports whether the shared connection of this link is up: a
+// dial that could log in brought it up and nothing dropped it since.
+func (l *Link) Shared() bool {
+	l.t.Helper()
+	l.refuseReal("Shared")
+	f, _ := readLink(l.a.Root(), l.alias)
+	return f.Shared
+}
+
+// DropShared ends the shared connection of this link, as an outage longer
+// than ssh's 10 minutes of ServerAlive or the end of ControlPersist does:
+// "-O check" fails from now on, the next dial that may log in logs in
+// again, and the bridges that ran over it end (Cut).
+func (l *Link) DropShared() {
+	l.t.Helper()
+	l.refuseReal("DropShared")
+	l.write(func(f *linkFile) { f.Shared = false })
+	l.Cut()
+}
+
+// Logins returns how many attempts of this link logged in so far: each
+// one an ssh login, which with the user's agent would ask for Touch ID.
+// A bridge over the shared connection and "-O check" are not logins.
+func (l *Link) Logins() int {
+	b, _ := os.ReadFile(loginsPath(l.a.Root(), l.alias))
+	return len(strings.Fields(string(b)))
+}
+
 // Pids returns the pids of the fake ssh processes of this link that still
 // run.
 func (l *Link) Pids() []int {
@@ -178,6 +216,11 @@ func (l *Link) Pids() []int {
 // pidsPath lists the pid of every attempt of the fake ssh for alias.
 func pidsPath(root, alias string) string {
 	return filepath.Join(root, "f", "ssh", alias+".pids")
+}
+
+// loginsPath lists the pid of every attempt that logged in.
+func loginsPath(root, alias string) string {
+	return filepath.Join(root, "f", "ssh", alias+".logins")
 }
 
 // bridgesPath lists the pid of every attempt that became the bridge.

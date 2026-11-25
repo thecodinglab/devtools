@@ -1,2 +1,2 @@
 size 80x1 cursor 0,0 hidden
- macmini  ✗ ssh could not log in. Run ssh macmini once in a shell.|
+ macmini  ✗ ssh could not log in. Open the hub to try again. Typing is paused.|

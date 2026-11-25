@@ -709,7 +709,7 @@ func TestHeadingOfAFailedMachineStaysUnderAFilter(t *testing.T) {
 		m.Update(esc)
 		typeInto(m, query)
 		view := strings.Join(plainRows(m, 80, 23), "\n")
-		if !strings.Contains(view, "\n  macbook   ✗ ssh could not log in. Run ssh macbook once in a shell.") {
+		if !strings.Contains(view, "\n  macbook   ✗ ssh could not log in. Open the hub to try again.") {
 			t.Fatalf("%s: the heading of the failed machine is gone:\n%s", query, view)
 		}
 		if query == "zzzz" && strings.Contains(view, "\n  macmini ") {

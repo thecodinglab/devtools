@@ -19,7 +19,7 @@ const (
 	backoffMax   = 120 * time.Second
 	backoffReset = 60 * time.Second // online this long: the next failure starts the backoff again
 	focusedRetry = 2 * time.Second  // while the terminal has focus, a transient failure is retried at least this often
-	attentionGap = 30 * time.Second // a reason that needs the user is retried this often
+	attentionGap = 30 * time.Second // a reason that needs the user is retried this often, without a login (3.5.2)
 	idleClose    = 10 * time.Minute // an on-demand machine nobody uses is closed (3.5.1)
 )
 
@@ -53,6 +53,12 @@ type machine struct {
 	onlineAt time.Time
 	nextID   uint64
 
+	// logging in (3.5.2): a remote dial may start a new ssh login, and so a
+	// prompt of the ssh agent, only on a grant of the user's presence
+	grant    grant
+	loginTry bool // the last attempt could log in
+	authHeld bool // its last login failed as auth: focus grants nothing until the hub or a switch does
+
 	// what the machine reported, cleaned (clean.go); kept after the link
 	// is gone until the next snapshot replaces it
 	st     *proto.State
@@ -64,6 +70,15 @@ type machine struct {
 
 	cat catalogState
 }
+
+// grant is what lets the next dial of a machine log in.
+type grant int
+
+const (
+	noGrant    grant = iota
+	focusGrant       // the terminal gained focus
+	userGrant        // the fleet started, the hub opened or a switch goes there
+)
 
 // online reports whether the machine has a link with its snapshot.
 func (mc *machine) online() bool { return mc.status == "online" }
@@ -107,6 +122,13 @@ func (f *Fleet) dial(mc *machine) {
 		return
 	}
 	mc.retry.stop()
+	// only a grant lets a remote dial log in (3.5.2); the local socket
+	// ignores the flag. The grant is used up by this dial.
+	login := mc.local || mc.grant != noGrant
+	if mc.grant == userGrant {
+		mc.authHeld = false
+	}
+	mc.grant, mc.loginTry = noGrant, login
 	mc.gen++
 	gen := mc.gen
 	ctx, cancel := context.WithCancel(f.ctx)
@@ -128,7 +150,7 @@ func (f *Fleet) dial(mc *machine) {
 	f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Connecting})
 	dialer, name := f.o.Dialer, mc.name
 	go func() {
-		link, fail := dialer.Dial(ctx, name)
+		link, fail := dialer.Dial(ctx, name, login)
 		if link != nil && ctx.Err() != nil {
 			// given up meanwhile: nobody will read it
 			link.Close()
@@ -282,6 +304,7 @@ func (f *Fleet) cameOnline(mc *machine, s proto.Snapshot) {
 	mc.boot = mc.welcome.Boot
 	f.replaceState(mc, s)
 	mc.status, mc.problem = "online", hub.Problem{}
+	mc.grant, mc.authHeld = noGrant, false
 	mc.onlineAt = f.clock.Now()
 	f.dirty = true
 	if first || !sameBoot {
@@ -370,18 +393,21 @@ func transient(mc *machine, r remote.Reason) bool {
 // attention when supervised, off otherwise.
 func (f *Fleet) failed(mc *machine, fail *remote.Failure) {
 	p := hub.Problem{Reason: string(fail.Reason), Text: cleanText(fail.Text)}
+	if fail.Reason == remote.Auth && !mc.local {
+		// a dismissed or locked ssh agent is not asked again by itself (3.5.2)
+		mc.authHeld, mc.grant = true, noGrant
+	}
 	switch {
 	case !f.supervised(mc):
 		mc.status, p.Retry = "off", "next-open"
+	case fail.Reason == remote.NeedsLogin && !mc.local:
+		// waiting for the user, not for a fix: the check is local and
+		// cheap, and another window may have logged in meanwhile (3.5.2)
+		mc.status, p.Retry = "attention", "login"
+		f.backOff(mc)
 	case transient(mc, fail.Reason):
 		mc.status, p.Retry = "retrying", "retrying"
-		d := mc.backoff
-		mc.backoff = min(mc.backoff*2, backoffMax)
-		if f.focused {
-			d = min(d, focusedRetry)
-		}
-		mc.failedAt = f.clock.Now()
-		f.scheduleRetry(mc, d)
+		f.backOff(mc)
 	default:
 		mc.status, p.Retry = "attention", "in-30s"
 		f.scheduleRetry(mc, attentionGap)
@@ -390,6 +416,29 @@ func (f *Fleet) failed(mc *machine, fail *remote.Failure) {
 	f.dirty = true
 	f.hubEvent(hub.Event{Machine: mc.name, Kind: hub.Failed, Err: p})
 	f.view.linkDown(mc, p)
+}
+
+// backOff schedules the retry of a transient failure: the backoff, at most
+// focusedRetry while the terminal has focus.
+func (f *Fleet) backOff(mc *machine) {
+	d := mc.backoff
+	mc.backoff = min(mc.backoff*2, backoffMax)
+	if f.focused {
+		d = min(d, focusedRetry)
+	}
+	mc.failedAt = f.clock.Now()
+	f.scheduleRetry(mc, d)
+}
+
+// backingOff reports whether mc waits for a retry on the backoff schedule.
+func backingOff(mc *machine) bool {
+	return mc.status == "retrying" || (mc.status == "attention" && mc.problem.Retry == "login")
+}
+
+// loginHelps reports whether mc's problem is one a new ssh login may
+// solve: the hub dials it again at once instead of waiting attentionGap.
+func loginHelps(mc *machine) bool {
+	return mc.problem.Reason == string(remote.Auth) || mc.problem.Reason == string(remote.NeedsLogin)
 }
 
 // scheduleRetry dials mc again after d, if it is still supervised then.
@@ -413,13 +462,41 @@ func (f *Fleet) scheduleRetry(mc *machine, d time.Duration) {
 	})
 }
 
-// hurryRetries brings the retries of transient failures forward when the
-// terminal gains focus: none dials later than focusedRetry after its
-// failure, and one that is overdue by that dials now.
+// grantLogin lets the next dial of mc log in (3.5.2). A grant of the user
+// (the hub, a switch) ends an attempt that cannot log in and has no link
+// yet, so the dial that follows can. Focus grants nothing to a machine
+// whose last login failed as auth.
+func (f *Fleet) grantLogin(mc *machine, g grant) {
+	if mc.local || mc.dropped || mc.online() || (mc.dialing && mc.loginTry) {
+		return
+	}
+	if g == focusGrant && mc.authHeld {
+		return
+	}
+	mc.grant = max(mc.grant, g)
+	if g == userGrant && mc.dialing && mc.link == nil {
+		f.endAttempt(mc)
+	}
+}
+
+// focusGrants is the terminal gaining focus: every supervised machine that
+// is not online may log in on its next dial.
+func (f *Fleet) focusGrants() {
+	for _, mc := range f.list() {
+		if f.supervised(mc) {
+			f.grantLogin(mc, focusGrant)
+		}
+	}
+}
+
+// hurryRetries brings the retries of transient failures, and of a needed
+// login, forward when the terminal gains focus: none dials later than
+// focusedRetry after its failure, and one that is overdue by that dials
+// now.
 func (f *Fleet) hurryRetries() {
 	now := f.clock.Now()
 	for _, mc := range f.list() {
-		if mc.status != "retrying" || !mc.retry.active() {
+		if !backingOff(mc) || !mc.retry.active() {
 			continue
 		}
 		due := mc.failedAt.Add(focusedRetry)

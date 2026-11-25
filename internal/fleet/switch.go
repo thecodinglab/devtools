@@ -386,7 +386,11 @@ func (s *switcher) start(mc *machine, t session.Target, k kind, notice string) {
 		s.sendViewSet(p)
 		return
 	}
-	// step 4: dial, and wait at most 10 s
+	// step 4: dial, and wait at most 10 s; a switch of the user may log in
+	// (3.5.2)
+	if k == kindUser {
+		s.f.grantLogin(mc, userGrant)
+	}
 	s.f.dial(mc)
 	p.wait = s.f.after(linkWait, func() {
 		if s.pend != p {

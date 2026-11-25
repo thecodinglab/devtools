@@ -111,12 +111,13 @@ func stateOf(ev Event) string {
 
 // failedState is the link state of a failed machine by its retry state
 // (3.5.2): retried with backoff, retried every 30 s because the reason needs
-// the user, or not supervised and tried again when the hub opens.
+// the user, waiting for the user to let it log in again, or not supervised
+// and tried again when the hub opens.
 func failedState(retry string) string {
 	switch retry {
 	case "retrying":
 		return "retrying"
-	case "in-30s":
+	case "in-30s", "login":
 		return "attention"
 	}
 	return "off"

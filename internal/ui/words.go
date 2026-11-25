@@ -34,7 +34,7 @@ const (
 
 // Problem is why a machine is not usable: the fields of hub.Problem.
 // Reason is a remote.Reason value or "lost"; Retry is "", "retrying",
-// "next-open" or "in-30s".
+// "next-open", "in-30s" or "login".
 type Problem struct{ Reason, Text, Retry string }
 
 // StartHint is the command a person runs to start the devtools server, the
@@ -164,8 +164,10 @@ func MachinePhrase(name, state string, p Problem, listing bool) (phrase string, 
 		return unreachable(state, p.Retry), false
 	case "unreachable", "lost":
 		return unreachable(state, p.Retry), false
+	case "login":
+		return "needs a new ssh login. Open the hub to log in.", false
 	case "auth":
-		return "ssh could not log in. Run ssh " + name + " once in a shell.", true
+		return "ssh could not log in. Open the hub to try again.", true
 	case "host-key":
 		return "host key not accepted. Run ssh " + name + " once and check it.", true
 	case "no-devtools":

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -149,8 +150,80 @@ func sshArgs(alias string) []string {
 	return []string{"-T",
 		"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
 		"-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
-		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
+		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=40",
 		"--", alias, "devtools", "bridge"}
+}
+
+// sharedArgs is sshArgs with the options of the shared connection before
+// "--" (3.5.2), and for check the -O check of that connection instead of
+// the bridge. master "no" is a bridge that may not log in, which also
+// offers no method to log in with.
+func sharedArgs(alias, master, path string, check bool) []string {
+	args := sshArgs(alias)
+	fixed, tail := args[:len(args)-4], args[len(args)-4:]
+	noLogin := []string{"-o", "ControlMaster=no", "-o", "ControlPath=" + path, "-o", "PreferredAuthentications=none"}
+	var share []string
+	switch {
+	case check:
+		share = append(noLogin, "-O", "check")
+		tail = tail[:2]
+	case master == "auto":
+		share = []string{"-o", "ControlMaster=auto", "-o", "ControlPath=" + path, "-o", "ControlPersist=15m"}
+	case master == "no":
+		share = noLogin
+	default:
+		share = []string{"-o", "ControlMaster=" + master, "-o", "ControlPath=" + path}
+	}
+	return append(append(slices.Clone(fixed), share...), tail...)
+}
+
+func TestHarnessFakeSSHModelsTheSharedConnection(t *testing.T) {
+	a, b := newMachine(t, "desktop"), newMachine(t, "macmini")
+	l := Connect(t, a, b, "macmini", false)
+	path := filepath.Join(a.StateDir, "ssh", "%C")
+	run := func(args []string) Result { return a.RunBin(fakeSSH, RunOptions{}, args...) }
+	expect := func(what string, logins int, shared bool) {
+		t.Helper()
+		if l.Logins() != logins || l.Shared() != shared {
+			t.Errorf("%s: %d logins, shared %v; want %d, %v", what, l.Logins(), l.Shared(), logins, shared)
+		}
+	}
+	check := func(what string, want int) {
+		t.Helper()
+		if r := run(sharedArgs("macmini", "", path, true)); r.Exit != want {
+			t.Errorf("%s: -O check exited %d, want %d (stderr %q)", what, r.Exit, want, r.Stderr)
+		}
+	}
+
+	check("before any login", 255)
+	run(sharedArgs("macmini", "auto", path, false))
+	expect("the first bridge that may log in", 1, true)
+	check("with the master up", 0)
+	run(sharedArgs("macmini", "no", path, false))
+	run(sharedArgs("macmini", "auto", path, false))
+	expect("bridges over the master", 1, true)
+	if l.Bridges() != 3 {
+		t.Errorf("%d bridges, want 3", l.Bridges())
+	}
+
+	l.DropShared()
+	check("after the master was dropped", 255)
+	if r := run(sharedArgs("macmini", "no", path, false)); r.Exit != 255 || !strings.Contains(r.Stderr, "Permission denied") {
+		t.Errorf("a bridge that may not log in without a master: exit %d, stderr %q", r.Exit, r.Stderr)
+	}
+	expect("a bridge that may not log in without a master", 1, false)
+	plain := sshArgs("macmini")
+	plain = slices.Insert(plain, len(plain)-4, "-o", "ControlMaster=no", "-o", "ControlPath="+path)
+	run(plain)
+	expect("ControlMaster=no without a master logs in as usual", 2, false)
+	l.Block("auth")
+	run(sharedArgs("macmini", "auto", path, false))
+	expect("a login that fails", 3, false)
+	l.Block("")
+	run(sshArgs("macmini"))
+	expect("a bridge that shares nothing", 4, false)
+	run(sharedArgs("macmini", "auto", path, false))
+	expect("a login again", 5, true)
 }
 
 func TestHarnessFakeSSHRecordsItsArguments(t *testing.T) {

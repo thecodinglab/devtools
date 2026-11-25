@@ -5,7 +5,7 @@ size 80x15 cursor 0,0 hidden
   macbook   not connected. ───────────────────────────────────────────────────|
   macmini   not reachable. Retrying. ─────────────────────────────────────────|
   macbook   not reachable. Opening the hub again retries. ────────────────────|
-  macmini   ✗ ssh could not log in. Run ssh macmini once in a shell. ─────────|
+  macmini   ✗ ssh could not log in. Open the hub to try again. ───────────────|
   macmini   ✗ host key not accepted. Run ssh macmini once and check it. ──────|
   macmini   ✗ devtools is not installed there. ───────────────────────────────|
   macmini   ✗ the devtools server is not running there. ──────────────────────|
@@ -34,7 +34,7 @@ styles
 5 58 20 p8
 6 1 9 bold p5 on #30323a
 6 12 1 p1
-6 69 9 p8
+6 63 15 p8
 7 1 9 bold p5 on #30323a
 7 12 1 p1
 7 72 6 p8

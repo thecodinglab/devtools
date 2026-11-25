@@ -62,7 +62,7 @@ type Machine struct {
 	Name, Host string
 	State      string // "off", "connecting", "online", "retrying", "attention"
 	Problem    string // the reason value of 3.5.2; "" when none
-	Retry      string // "", "retrying", "next-open", "in-30s"
+	Retry      string // "", "retrying", "next-open", "in-30s", "login"
 	Reason     string // one sanitised line, "" none
 	Agents     map[string]int
 	Busy       int // agents that were not idle in the last snapshot; kept while State is "off" (the `{m} off` entry of 5a.6.2)

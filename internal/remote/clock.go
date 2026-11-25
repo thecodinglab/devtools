@@ -19,6 +19,7 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 // Intervals of 3.5.2, 4.2.8 and 4.4.
 const (
 	attemptLimit  = 30 * time.Second // a dial that is not online by then is killed
+	checkLimit    = 5 * time.Second  // an "ssh -O check" that has not answered by then is killed
 	pingEvery     = 5 * time.Second  // a ping when nothing was sent for this long
 	silenceLimit  = 10 * time.Second // the link is lost when nothing arrived for this long
 	bridgeSilence = 60 * time.Second // the bridge exits when stdin was silent this long

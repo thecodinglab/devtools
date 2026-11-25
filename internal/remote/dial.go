@@ -29,11 +29,15 @@ type dialer struct {
 // and, on an interactive connection, the first state.snapshot arrived; that
 // snapshot is the first message of Recv. An attempt that is not online
 // after 30 s, or whose ctx ends, is killed and fails as unreachable.
-func (d *dialer) Dial(ctx context.Context, machine string) (Link, *Failure) {
+// Without login a dial to another machine starts no new ssh login: it runs
+// only over a shared connection that is open and otherwise fails as
+// NeedsLogin before the ssh of the bridge starts (share, 3.5.2). The local
+// socket ignores login.
+func (d *dialer) Dial(ctx context.Context, machine string, login bool) (Link, *Failure) {
 	if machine == "" {
 		return d.dialLocal(ctx)
 	}
-	return d.dialSSH(ctx, machine)
+	return d.dialSSH(ctx, machine, login)
 }
 
 // attempt bounds one dial by the attempt limit and ctx: when either ends
@@ -105,13 +109,17 @@ func (d *dialer) dialLocal(ctx context.Context) (Link, *Failure) {
 	return newLink(d.clk, w, conn, conn, func() { conn.Close() }, lost, first...), nil
 }
 
-func (d *dialer) dialSSH(ctx context.Context, machine string) (Link, *Failure) {
+func (d *dialer) dialSSH(ctx context.Context, machine string, login bool) (Link, *Failure) {
 	// Machine names come from the config, which checks them (SEC4); this is
 	// the second line of defence before anything runs.
 	if !session.ValidMachine(machine) {
 		return nil, failure(Protocol, "not a machine name: "+machine, "")
 	}
-	p, err := startSSH(d.opts.SSH, machine)
+	args, f := d.share(ctx, machine, login)
+	if f != nil {
+		return nil, f
+	}
+	p, err := startSSH(d.opts.SSH, args)
 	if err != nil {
 		return nil, failure(Unreachable, "ssh could not be started: "+err.Error(), "")
 	}
@@ -128,6 +136,12 @@ func (d *dialer) dialSSH(ctx context.Context, machine string) (Link, *Failure) {
 	if f != nil {
 		f = a.settle(f)
 		p.kill()
+		if !login && f.Reason == Auth {
+			// the master took no session and noLogin refused the login
+			// ssh tried instead (3.5.2): no prompt was shown, the user
+			// still has to log in
+			f = needsLogin(machine)
+		}
 		return nil, f
 	}
 
@@ -167,6 +181,47 @@ func (d *dialer) dialSSH(ctx context.Context, machine string) (Link, *Failure) {
 		}
 	}()
 	return l, nil
+}
+
+// share chooses how the bridge to machine shares the connection
+// (3.5.2). A dial that may log in becomes or reuses the master. One that
+// may not runs only over a master that "ssh -O check" finds up, and
+// otherwise fails as NeedsLogin before any ssh of the bridge starts.
+func (d *dialer) share(ctx context.Context, machine string, login bool) ([]string, *Failure) {
+	path, shared := controlPath(d.opts.ControlDir)
+	switch {
+	case login && shared:
+		return bridgeArgs(machine, sharing{path: path, login: true}), nil
+	case login:
+		return SSHArgs(machine), nil
+	case shared && d.checkShared(ctx, machine, path):
+		// The master may end between the check and the dial, or take no
+		// session; ssh then tries to log in, which noLogin refuses
+		// without a prompt, and the dial fails as NeedsLogin.
+		return bridgeArgs(machine, sharing{path: path}), nil
+	}
+	return nil, needsLogin(machine)
+}
+
+// needsLogin is the failure of a dial to machine that may not log in and
+// finds no shared connection that takes it.
+func needsLogin(machine string) *Failure {
+	return failure(NeedsLogin, "no ssh connection to "+machine+" is open, and logging in again needs you", "")
+}
+
+// checkShared runs "ssh -O check" for machine, bounded by ctx and checkLimit.
+func (d *dialer) checkShared(ctx context.Context, machine, path string) bool {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	limit := d.clk.After(checkLimit)
+	go func() {
+		select {
+		case <-limit:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return sharedUp(ctx, d.opts.SSH, machine, path)
 }
 
 // handshake sends hello and reads welcome and, for an interactive hello,

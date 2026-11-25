@@ -318,12 +318,19 @@ func (m *DevtoolsMultiplexer) clientOptions(p *guard.Pass, e mux.Entry) (client.
 	if m.deps.Out != nil {
 		cols, rows, _ = platform.Winsize(m.deps.Out)
 	}
+	// The control sockets of the shared ssh connections live in the
+	// state directory (3.5.2); without one nothing is shared.
+	controlDir := ""
+	if dir, err := proto.StateDir(); err == nil {
+		controlDir = filepath.Join(dir, "ssh")
+	}
 	f := newFleet(fleet.Options{
 		Machines: cfg.Machines,
 		Dialer: remote.NewDialer(remote.DialOptions{
-			SSH:    "ssh",
-			Socket: m.socket,
-			Hello:  m.interactiveHello(version),
+			SSH:        "ssh",
+			Socket:     m.socket,
+			Hello:      m.interactiveHello(version),
+			ControlDir: controlDir,
 		}),
 		Cols: cols,
 		Rows: rows,

@@ -43,7 +43,7 @@ const (
 type Problem struct {
 	Reason string // a remote.Reason value, or "lost"
 	Text   string
-	Retry  string // "", "retrying", "next-open", "in-30s"
+	Retry  string // "", "retrying", "next-open", "in-30s", "login"
 }
 
 // Event is one thing the hub learns about one machine.

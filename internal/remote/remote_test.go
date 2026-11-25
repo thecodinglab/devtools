@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +59,24 @@ func TestMain(m *testing.M) {
 //	slow-marker  runs Bridge, writing its ready line one byte at a time
 //	no-bridge    an old build: unknown command "bridge", exit 1
 //
+// An invocation with "-O check" or a ControlPath first goes to the shared
+// connection, as the mux client of OpenSSH does (mux.c, muxclient).
+// FAKE_SSH_CHECK is the state of its master:
+//
+//	up      it runs: the check exits 0, a bridge runs over it
+//	refuse  it runs but takes no new session (its MaxSessions are used):
+//	        the check exits 0, a bridge falls back to a login
+//	hang    it answers nothing: the invocation never ends
+//	else    there is none: the check exits 255, a bridge logs in
+//
+// FAKE_SSH_CONFIG_MASTER is the ControlMaster of the user's ssh config,
+// which counts when the command line sets none. With yes or ask ssh skips
+// the master, even for "-O check", and logs in.
+//
+// A login offers the methods of PreferredAuthentications: with "none" it
+// fails as "Permission denied", else the agent is asked, which appends a
+// line to the file FAKE_SSH_LOGINS names, and the invocation goes on.
+//
 // FAKE_SSH_ARGV names a file that gets one JSON line with the arguments of
 // every invocation; FAKE_SSH_PID a file that gets the pid.
 func fakeSSH(args []string) int {
@@ -71,6 +90,11 @@ func fakeSSH(args []string) int {
 	}
 	if f := os.Getenv("FAKE_SSH_PID"); f != "" {
 		os.WriteFile(f, []byte(strconv.Itoa(os.Getpid())), 0o600)
+	}
+	if slices.Contains(args, "-O") || fakeOption(args, "ControlPath") != "" {
+		if code, done := fakeMux(args); done {
+			return code
+		}
 	}
 	socket := os.Getenv("FAKE_SSH_SOCKET")
 	switch mode := os.Getenv("FAKE_SSH_MODE"); mode {
@@ -99,6 +123,63 @@ func fakeSSH(args []string) int {
 		fmt.Fprintf(os.Stderr, "fake ssh: unknown mode %q\n", mode)
 		return 99
 	}
+}
+
+// fakeMux is the shared connection of an invocation: done is false when
+// the invocation goes on as the bridge.
+func fakeMux(args []string) (code int, done bool) {
+	check := slices.Contains(args, "-O")
+	master := fakeOption(args, "ControlMaster")
+	if master == "" {
+		master = os.Getenv("FAKE_SSH_CONFIG_MASTER")
+	}
+	if master == "yes" || master == "ask" {
+		return fakeLogin(args, check)
+	}
+	switch state := os.Getenv("FAKE_SSH_CHECK"); {
+	case state == "hang":
+		time.Sleep(time.Hour)
+		return 0, true
+	case (state == "up" || state == "refuse") && check:
+		fmt.Fprintf(os.Stderr, "Master running (pid=%d)\r\n", os.Getpid())
+		return 0, true
+	case state == "up":
+		return 0, false
+	case state == "refuse":
+		fmt.Fprint(os.Stderr, "mux_client_request_session: session request failed: Session open refused by peer\r\n")
+	case check:
+		fmt.Fprint(os.Stderr, "Control socket connect(/x/%C): No such file or directory\r\n")
+		return 255, true
+	}
+	return fakeLogin(args, check)
+}
+
+// fakeLogin is the login ssh starts when no master served the invocation.
+// A check that logged in ran a shell on /dev/null, which exits 0.
+func fakeLogin(args []string, check bool) (code int, done bool) {
+	if fakeOption(args, "PreferredAuthentications") == "none" {
+		fmt.Fprint(os.Stderr, "florian@macmini: Permission denied (publickey).\r\n")
+		return 255, true
+	}
+	if f := os.Getenv("FAKE_SSH_LOGINS"); f != "" {
+		out, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			fmt.Fprintln(out, "the agent was asked")
+			out.Close()
+		}
+	}
+	return 0, check
+}
+
+// fakeOption is the value of the first "-o name=value" of args, as ssh
+// takes the first value it gets; "" when there is none.
+func fakeOption(args []string, name string) string {
+	for i := 0; i+1 < len(args) && args[i] != "--"; i++ {
+		if k, v, ok := strings.Cut(args[i+1], "="); args[i] == "-o" && ok && strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
 }
 
 // garbage is n bytes of login banner: escape sequences, binary bytes and a
@@ -169,6 +250,7 @@ type sshRig struct {
 	dir    string
 	argv   string
 	pid    string
+	login  string // FAKE_SSH_LOGINS
 	dialer *dialer
 	clock  *fakeClock // nil: the wall clock
 }
@@ -178,18 +260,33 @@ func newSSHRig(t *testing.T, mode string) *sshRig {
 	r := &sshRig{t: t, ssh: fakeSSHPath(t), srv: prototest.NewServer(t), dir: testkit.ShortTempDir(t)}
 	r.argv = filepath.Join(r.dir, "argv")
 	r.pid = filepath.Join(r.dir, "pid")
+	r.login = filepath.Join(r.dir, "logins")
 	t.Setenv("FAKE_SSH_MODE", mode)
 	t.Setenv("FAKE_SSH_SOCKET", r.srv.Socket())
 	t.Setenv("FAKE_SSH_ARGV", r.argv)
 	t.Setenv("FAKE_SSH_PID", r.pid)
+	t.Setenv("FAKE_SSH_LOGINS", r.login)
 	r.dialer = NewDialer(DialOptions{SSH: r.ssh, Hello: localHello()}).(*dialer)
 	return r
+}
+
+// share gives the rig's dialer a ControlDir and returns it.
+func (r *sshRig) share() string {
+	dir := filepath.Join(r.dir, "c")
+	r.dialer.opts.ControlDir = dir
+	return dir
 }
 
 func (r *sshRig) useFakeClock() *fakeClock {
 	r.clock = newFakeClock()
 	r.dialer.clk = r.clock
 	return r.clock
+}
+
+// logins is how many invocations asked the agent: each one a prompt.
+func (r *sshRig) logins() int {
+	b, _ := os.ReadFile(r.login)
+	return strings.Count(string(b), "\n")
 }
 
 // argvs returns the recorded argument vectors, one per invocation.
@@ -246,10 +343,15 @@ type dialResult struct {
 	fail *Failure
 }
 
+// dialAsync dials machine with login, as the first dial of a fleet does.
 func dialAsync(d Dialer, machine string) <-chan dialResult {
+	return dialLogin(d, machine, true)
+}
+
+func dialLogin(d Dialer, machine string, login bool) <-chan dialResult {
 	ch := make(chan dialResult, 1)
 	go func() {
-		l, f := d.Dial(context.Background(), machine)
+		l, f := d.Dial(context.Background(), machine, login)
 		ch <- dialResult{l, f}
 	}()
 	return ch

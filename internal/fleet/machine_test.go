@@ -197,6 +197,7 @@ func TestEveryFailureReasonReachesTheHeading(t *testing.T) {
 		{remote.NoServer, "in-30s"},
 		{remote.Incompatible, "in-30s"},
 		{remote.Protocol, "retrying"},
+		{remote.NeedsLogin, "login"},
 	}
 	for _, c := range reasons {
 		t.Run(string(c.reason)+" on demand", func(t *testing.T) {
@@ -225,7 +226,7 @@ func TestEveryFailureReasonReachesTheHeading(t *testing.T) {
 			if ev.Err.Reason != string(c.reason) || ev.Err.Retry != c.permanent {
 				t.Fatalf("heading %+v, want reason %s and retry %s", ev.Err, c.reason, c.permanent)
 			}
-			state := map[string]string{"in-30s": "attention", "retrying": "retrying"}[c.permanent]
+			state := map[string]string{"in-30s": "attention", "login": "attention", "retrying": "retrying"}[c.permanent]
 			r.Settle(func(s fleet.SummaryData) bool { return fleettest.StateOf(s, "M") == state })
 		})
 	}

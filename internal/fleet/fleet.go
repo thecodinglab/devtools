@@ -173,6 +173,8 @@ func (f *Fleet) Run(ctx context.Context) error {
 	defer f.shutdown()
 	for _, mc := range f.machines {
 		if mc.local || mc.connect {
+			// the user just started the client: the first dial may log in
+			f.grantLogin(mc, userGrant)
 			f.dial(mc)
 		}
 	}
@@ -306,6 +308,7 @@ func (f *Fleet) Resize(cols, rows int) {
 // Focus records whether the outer terminal has focus and forwards the
 // change to the link of what is displayed (3.6.3: "seen" on that server).
 // While it has focus, a lost link is retried at least every focusedRetry.
+// Gaining it lets the next dial of every supervised machine log in (3.5.2).
 func (f *Fleet) Focus(focused bool) {
 	f.post(func() {
 		if f.focused == focused {
@@ -319,6 +322,7 @@ func (f *Fleet) Focus(focused bool) {
 		}
 		f.view.focusChanged()
 		if focused {
+			f.focusGrants()
 			f.hurryRetries()
 		}
 		f.dirty = true

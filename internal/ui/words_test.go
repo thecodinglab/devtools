@@ -57,7 +57,7 @@ const machine = "macmini"
 var (
 	backends     = []string{"devtools", "tmux", "herdr"}
 	capabilities = []string{"machines", "agent-status", "window", "pane-focus", "layout", "detached-open"}
-	reasons      = []string{"auth", "host-key", "unreachable", "no-devtools", "no-server", "incompatible", "protocol", "lost"}
+	reasons      = []string{"auth", "login", "host-key", "unreachable", "no-devtools", "no-server", "incompatible", "protocol", "lost"}
 )
 
 func TestMachinePhraseForEveryStateAndReason(t *testing.T) {
@@ -76,7 +76,9 @@ func TestMachinePhraseForEveryStateAndReason(t *testing.T) {
 		{"off", "off", Problem{}, false, "not connected.", false},
 		{"unreachable, retrying", "retrying", Problem{Reason: "unreachable", Retry: "retrying"}, false, "not reachable. Retrying.", false},
 		{"unreachable, retried when the hub opens", "off", Problem{Reason: "unreachable", Retry: "next-open"}, false, "not reachable. Opening the hub again retries.", false},
-		{"auth", "attention", Problem{Reason: "auth", Retry: "in-30s"}, false, "ssh could not log in. Run ssh macmini once in a shell.", true},
+		{"auth", "attention", Problem{Reason: "auth", Retry: "in-30s"}, false, "ssh could not log in. Open the hub to try again.", true},
+		{"login", "attention", Problem{Reason: "login", Retry: "login"}, false, "needs a new ssh login. Open the hub to log in.", false},
+		{"login, retried when the hub opens", "off", Problem{Reason: "login", Retry: "next-open"}, false, "needs a new ssh login. Open the hub to log in.", false},
 		{"host-key", "attention", Problem{Reason: "host-key", Retry: "in-30s"}, false, "host key not accepted. Run ssh macmini once and check it.", true},
 		{"no-devtools", "attention", Problem{Reason: "no-devtools"}, false, "devtools is not installed there.", true},
 		{"no-server", "attention", Problem{Reason: "no-server"}, false, "the devtools server is not running there.", true},
@@ -114,6 +116,7 @@ func TestMachinePhraseForEveryStateAndReason(t *testing.T) {
 func TestReasonWordForEveryReason(t *testing.T) {
 	want := map[string]string{
 		"auth":         "auth",
+		"login":        "login",
 		"host-key":     "host key",
 		"unreachable":  "unreachable",
 		"no-devtools":  "no devtools",
@@ -211,6 +214,7 @@ func TestEveryNoticeFitsFiftyCells(t *testing.T) {
 		"no-answer":        "macmini did not answer",
 		"still-connecting": "still connecting to macmini",
 		"machine auth":     "macmini ssh could not log in.",
+		"machine login":    "macmini needs a new ssh login.",
 		"machine lost":     "macmini not reachable.",
 		"refused":          "macmini: no such session",
 		"keys-dropped":     "Some keys typed during the switch were dropped",
@@ -453,7 +457,7 @@ func everyText() []string {
 	}
 	for _, state := range []string{"off", "connecting", "online", "retrying", "attention"} {
 		for _, r := range append([]string{""}, reasons...) {
-			for _, retry := range []string{"", "retrying", "next-open", "in-30s"} {
+			for _, retry := range []string{"", "retrying", "next-open", "in-30s", "login"} {
 				for _, listing := range []bool{false, true} {
 					p, _ := MachinePhrase(machine, state, Problem{Reason: r, Text: "x", Retry: retry}, listing)
 					all = append(all, p)

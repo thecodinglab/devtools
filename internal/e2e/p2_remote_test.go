@@ -134,17 +134,47 @@ func waitGroupsGone(leaders []int, d time.Duration) {
 }
 
 // notTheBridge says what is wrong with one argument list of the fake ssh,
-// "" when it is the vector of 4.4 followed by `devtools bridge`: -T
-// present, -t absent.
+// "" when it is the vector of 4.4 followed by `devtools bridge`, alone or
+// with the options of the shared connection (3.5.2), or the -O check of
+// that connection: -T present, -t absent.
 func notTheBridge(args []string) string {
 	var problems []string
-	if len(args) != len(bridgeArgs("")) || !validAlias(args[14]) || !slices.Equal(args, bridgeArgs(args[14])) {
+	if !bridgeForm(args) {
 		problems = append(problems, fmt.Sprintf("ssh %q, want ssh %q", args, bridgeArgs("<alias>")))
 	}
 	if !slices.Contains(args, "-T") || slices.Contains(args, "-t") || slices.Contains(args, "-tt") {
 		problems = append(problems, fmt.Sprintf("ssh %q: -T must be there and -t not", args))
 	}
 	return strings.Join(problems, "; ")
+}
+
+// bridgeForm reports whether args is one of the vectors of 4.4 and 3.5.2
+// for a valid alias: the bridge sharing nothing, the bridge that may log
+// in and become the master, the bridge over the master, or its check; the
+// ControlPath is <state directory>/ssh/%C.
+func bridgeForm(args []string) bool {
+	i := slices.Index(args, "--")
+	if i < 0 || i+1 >= len(args) || !validAlias(args[i+1]) {
+		return false
+	}
+	alias := args[i+1]
+	if slices.Equal(args, bridgeArgs(alias)) {
+		return true
+	}
+	path, ok := sshOption(args, "ControlPath")
+	if !ok || !filepath.IsAbs(path) || !strings.HasSuffix(path, "/ssh/%C") {
+		return false
+	}
+	for _, form := range [][]string{
+		sharedArgs(alias, "auto", path, false),
+		sharedArgs(alias, "no", path, false),
+		sharedArgs(alias, "", path, true),
+	} {
+		if slices.Equal(args, form) {
+			return true
+		}
+	}
+	return false
 }
 
 // bridgeArgs is the argument vector of 4.4 after "ssh" for alias, written
@@ -157,7 +187,7 @@ func bridgeArgs(alias string) []string {
 		"-o", "ConnectTimeout=10",
 		"-o", "ConnectionAttempts=1",
 		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=4",
+		"-o", "ServerAliveCountMax=40",
 		"--", alias, "devtools", "bridge",
 	}
 }
@@ -380,10 +410,11 @@ func TestP2AgentsLandsOnThePaneOfAnotherMachine(t *testing.T) {
 }
 
 // N7: every argument list a fake ssh received is the vector of 4.4
-// followed by `devtools bridge`: -T present, -t absent. This test dials
-// itself in every way the fleet does: a held link, a dial on demand, a
-// redial after a cut, an attempt that fails, and checks its own lists and
-// those of the tests that ended before it. The lists of every other test
+// followed by `devtools bridge`, alone or with the options of the shared
+// connection of 3.5.2, or the -O check of that connection: -T present, -t
+// absent. This test dials itself in every way the fleet does: a held link,
+// a dial on demand, a redial after a cut, an attempt that fails, and checks
+// its own lists and those of the tests that ended before it. The lists of every other test
 // whose machines had a terminal, before or after this one, parallel or
 // not, are checked in that test's own cleanup (watchSSH), which fails it.
 func TestP2EveryRecordedSSHIsTheBridge(t *testing.T) {
@@ -409,8 +440,8 @@ func TestP2EveryRecordedSSHIsTheBridge(t *testing.T) {
 	own := f.a.SSHLog()
 	aliases := map[string]int{}
 	for _, args := range own {
-		if len(args) > 14 {
-			aliases[args[14]]++
+		if dest, _, ok := parseSSH(args); ok {
+			aliases[dest]++
 		}
 	}
 	if len(own) < 4 || aliases["macmini"] < 2 || aliases["macbook"] < 2 {

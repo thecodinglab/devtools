@@ -142,7 +142,7 @@ func farRequest(a *Machine, machine string, req proto.Typed) (proto.Reply, error
 	d := remote.NewDialer(remote.DialOptions{SSH: ssh, Hello: proto.Hello{Gen: proto.Gen, Version: "e2e", Kind: proto.KindOneshot}})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	l, fail := d.Dial(ctx, machine)
+	l, fail := d.Dial(ctx, machine, true)
 	if fail != nil {
 		return proto.Reply{}, fmt.Errorf("the bridge to %s: %s: %s", machine, fail.Reason, fail.Error())
 	}
@@ -485,7 +485,7 @@ func TestSwitchLocalHeldCold(t *testing.T) {
 // failed (5a.14.4).
 func machineNotices(machine string) []string {
 	out := []string{ui.Notice("no-answer", machine), ui.Notice("still-connecting", machine), ui.Notice("refused", machine, "")}
-	for _, r := range []remote.Reason{remote.Auth, remote.HostKey, remote.Unreachable, remote.NoDevtools, remote.NoServer, remote.Incompatible, remote.Protocol, "lost"} {
+	for _, r := range []remote.Reason{remote.Auth, remote.NeedsLogin, remote.HostKey, remote.Unreachable, remote.NoDevtools, remote.NoServer, remote.Incompatible, remote.Protocol, "lost"} {
 		out = append(out, ui.Notice("machine", machine, string(r), ""))
 	}
 	for i, n := range out {
@@ -625,6 +625,26 @@ func TestLinkCutShowsStaleThenResumes(t *testing.T) {
 	waitText(t, f.x, 20*time.Second, ui.BannerPaused)
 	pick(t, f.x, "", "alpha")
 	f.lb.Block("")
+}
+
+// A redial after a lost link runs over the shared ssh connection (3.5.2):
+// the window logged in to the macmini once, and while that connection is
+// up a cut costs no new login, which with the user's agent is a Touch ID
+// prompt.
+func TestARedialRunsOverTheSharedConnection(t *testing.T) {
+	t.Parallel()
+	f := newFleet(t)
+	if n := f.lb.Logins(); n != 1 || !f.lb.Shared() {
+		t.Fatalf("the first link to the macmini: %d logins, shared %v; want one login and the shared connection up", n, f.lb.Shared())
+	}
+	for i := range 2 {
+		bridges := f.lb.Bridges()
+		f.lb.Cut()
+		eventually(t, 60*time.Second, "a new bridge to the macmini", func() bool { return f.lb.Bridges() > bridges && linked(f.b) })
+		if n := f.lb.Logins(); n != 1 {
+			t.Errorf("after cut %d: %d logins to the macmini, want still 1", i+1, n)
+		}
+	}
 }
 
 func TestRemoteServerRestartReopensByDirectory(t *testing.T) {

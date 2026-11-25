@@ -21,11 +21,13 @@ import (
 
 // Machine is one devtools server with its own HOME and XDG_STATE_HOME.
 //
-// Its directory, a short temporary directory, holds h (the HOME), b (the
-// bin directory that comes first on every PATH of the machine: devtools,
-// the pane shell and whichever fakes a test placed there) and f (the files
-// of the fakes: their state and their logs). StateDir is the devtools state
-// directory, where the server's socket and state.json are.
+// Its directory, a short temporary directory, holds h (the HOME), s (the
+// XDG_STATE_HOME), b (the bin directory that comes first on every PATH of
+// the machine: devtools, the pane shell and whichever fakes a test placed
+// there) and f (the files of the fakes: their state and their logs).
+// StateDir is the devtools state directory, where the server's socket,
+// state.json and the ssh control directory are; it is s/devtools, not
+// under h, so that the control sockets fit the 104 bytes of macOS (3.5.2).
 type Machine struct{ Name, Home, StateDir string }
 
 // machines holds what a Machine needs beyond its three public fields; it
@@ -127,7 +129,7 @@ func newMachine(t *testing.T, name string) *Machine {
 	}
 	root := testkit.ShortTempDir(t)
 	home := filepath.Join(root, "h")
-	m := &Machine{Name: name, Home: home, StateDir: filepath.Join(home, ".local", "state", "devtools")}
+	m := &Machine{Name: name, Home: home, StateDir: filepath.Join(root, "s", "devtools")}
 	for _, dir := range []string{
 		filepath.Join(home, ".config", "devtools"), m.StateDir,
 		filepath.Join(root, "b"), filepath.Join(root, "f", "panes"), filepath.Join(root, "f", "ssh"),
@@ -317,6 +319,7 @@ func (m *Machine) Env(extra ...string) []string {
 // builds the environment of the bridge with it, in another process.
 func machineEnv(root string) []string {
 	return testkit.CleanEnv(filepath.Join(root, "h"),
+		"XDG_STATE_HOME="+filepath.Join(root, "s"),
 		"PATH="+filepath.Join(root, "b")+":/usr/bin:/bin",
 		"SHELL="+filepath.Join(root, "b", paneShell),
 		// The fakes are the test binary, which under -race sleeps a second

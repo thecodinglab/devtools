@@ -121,7 +121,7 @@ func (c *stepClock) advance(d time.Duration, f *Fleet) {
 // fails it, or until the fleet gives it up.
 type waitDialer struct{}
 
-func (waitDialer) Dial(ctx context.Context, machine string) (remote.Link, *remote.Failure) {
+func (waitDialer) Dial(ctx context.Context, machine string, login bool) (remote.Link, *remote.Failure) {
 	<-ctx.Done()
 	return nil, &remote.Failure{Reason: remote.Unreachable, Text: "given up"}
 }

@@ -25,6 +25,10 @@ const (
 	NoServer     Reason = "no-server"
 	Incompatible Reason = "incompatible"
 	Protocol     Reason = "protocol"
+	// NeedsLogin: a dial that may not log in found no shared ssh
+	// connection to the machine open, so reaching it needs a new ssh
+	// login, which may ask the user (3.5.2).
+	NeedsLogin Reason = "login"
 )
 
 // Failure is a classified failure of a dial or of a live link.
@@ -50,9 +54,13 @@ type Link interface {
 	Close()
 }
 
-// Dialer opens links. machine "" is the local socket.
+// Dialer opens links. machine "" is the local socket, which ignores
+// login. For another machine login says whether the dial may start a new
+// ssh login, which may ask the user through the ssh agent; without it the
+// dial only uses the shared connection that is open, and fails as
+// NeedsLogin when there is none (3.5.2).
 type Dialer interface {
-	Dial(ctx context.Context, machine string) (Link, *Failure)
+	Dial(ctx context.Context, machine string, login bool) (Link, *Failure)
 }
 
 // DialOptions configure NewDialer.
@@ -60,4 +68,7 @@ type DialOptions struct {
 	SSH    string // the ssh program, "ssh"
 	Socket string // the local socket, proto.SocketPath()
 	Hello  proto.Hello
+	// ControlDir holds the control sockets of the shared ssh connections,
+	// <proto.StateDir()>/ssh; "" shares nothing.
+	ControlDir string
 }

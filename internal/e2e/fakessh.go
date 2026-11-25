@@ -79,12 +79,67 @@ func parseSSH(args []string) (dest string, command []string, ok bool) {
 	return args[i], args[i+1:], true
 }
 
+// sshFlags returns every flag before the destination with its argument
+// ("" for a flag without one), in order: -o ControlPath=x is {'o',
+// "ControlPath=x"}.
+func sshFlags(args []string) (flags []byte, values []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" || !strings.HasPrefix(a, "-") || a == "-" {
+			break
+		}
+		for j := 1; j < len(a); j++ {
+			if strings.IndexByte(sshArgOptions, a[j]) < 0 {
+				flags, values = append(flags, a[j]), append(values, "")
+				continue
+			}
+			v := a[j+1:]
+			if v == "" && i+1 < len(args) {
+				i++
+				v = args[i]
+			}
+			flags, values = append(flags, a[j]), append(values, v)
+			break
+		}
+	}
+	return flags, values
+}
+
+// sshFlag returns the argument of the first -<flag> ("-O check").
+func sshFlag(args []string, flag byte) (string, bool) {
+	flags, values := sshFlags(args)
+	for i, f := range flags {
+		if f == flag {
+			return values[i], true
+		}
+	}
+	return "", false
+}
+
+// sshOption returns the value of the option name ("ControlMaster") given
+// with -o, and whether it was given; as in ssh, the first value counts and
+// the name is matched without case.
+func sshOption(args []string, name string) (string, bool) {
+	flags, values := sshFlags(args)
+	for i, f := range flags {
+		if k, v, ok := strings.Cut(values[i], "="); f == 'o' && ok && strings.EqualFold(k, name) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 // runFakeSSH is the fake ssh: the test binary started as "ssh" from the bin
 // directory of a machine. It appends its argument list to the machine's
 // ssh log, then, for an alias that Connect made, either fails like the
 // reason Block set or becomes `devtools bridge` of the other machine, with
 // that machine's environment: the pid stays the same, so Cut ends the
 // bridge. It never contacts a host.
+//
+// It models the shared connection of 3.5.2 in the link file: "-O check"
+// exits 0 only while it is up; a bridge with a ControlPath over it needs no
+// login; any other bridge logs in (Logins counts it), and one with
+// ControlMaster=auto whose login succeeds brings it up.
 func runFakeSSH(args []string) int {
 	root, err := selfRoot()
 	if err != nil {
@@ -108,6 +163,24 @@ func runFakeSSH(args []string) int {
 		fmt.Fprintf(os.Stderr, "ssh: Could not resolve hostname %s: Name or service not known\r\n", dest)
 		return 255
 	}
+	path, hasPath := sshOption(args, "ControlPath")
+	if op, ok := sshFlag(args, 'O'); ok {
+		switch {
+		case op != "check" || !hasPath:
+			fmt.Fprintf(os.Stderr, "e2e fake ssh: only -O check with a ControlPath is modelled, not -O %s\n", op)
+			return 255
+		case link.Shared:
+			fmt.Fprintf(os.Stderr, "Master running (pid=%d)\r\n", os.Getpid())
+			return 0
+		}
+		fmt.Fprintf(os.Stderr, "Control socket connect(%s): No such file or directory\r\n", path)
+		return 255
+	}
+	master, _ := sshOption(args, "ControlMaster")
+	if master != "" && master != "auto" && master != "no" {
+		fmt.Fprintf(os.Stderr, "e2e fake ssh: ControlMaster=%s is not modelled\n", master)
+		return 255
+	}
 	// The pid is written first, so that Cut also ends an attempt that is
 	// still delayed.
 	if err := appendLine(pidsPath(root, dest), []byte(strconv.Itoa(os.Getpid()))); err != nil {
@@ -116,6 +189,33 @@ func runFakeSSH(args []string) int {
 	}
 	if link.DelayMs > 0 {
 		time.Sleep(time.Duration(link.DelayMs) * time.Millisecond)
+		// what the delay changed: another attempt may have logged in
+		link, err = readLink(root, dest)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "e2e fake ssh: %v\n", err)
+			return 255
+		}
+	}
+	// Over a shared connection that is up ssh authenticates nothing;
+	// without one, ControlMaster=no too logs in as usual, unless
+	// PreferredAuthentications=none leaves it no method to log in with.
+	if !(hasPath && link.Shared) {
+		if methods, _ := sshOption(args, "PreferredAuthentications"); methods == "none" {
+			fmt.Fprintf(os.Stderr, "%s: Permission denied (publickey).\r\n", dest)
+			return 255
+		}
+		if err := appendLine(loginsPath(root, dest), []byte(strconv.Itoa(os.Getpid()))); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e fake ssh: %v\n", err)
+			return 255
+		}
+		// The master is up once the login succeeded, whatever the remote
+		// command then does.
+		if master == "auto" && hasPath && !blocksLogin(link.Block) {
+			if err := changeLink(root, dest, func(f *linkFile) { f.Shared = true }); err != nil {
+				fmt.Fprintf(os.Stderr, "e2e fake ssh: %v\n", err)
+				return 255
+			}
+		}
 	}
 	if f, ok := blockFailures[link.Block]; ok {
 		return fail(f, dest)
@@ -132,6 +232,12 @@ func runFakeSSH(args []string) int {
 	err = syscall.Exec(bin, []string{bin, "bridge"}, machineEnv(link.Root))
 	fmt.Fprintf(os.Stderr, "e2e fake ssh: run the bridge: %v\n", err)
 	return 255
+}
+
+// blocksLogin reports whether the failure of reason ends ssh before its
+// login succeeds.
+func blocksLogin(reason string) bool {
+	return reason == "auth" || reason == "host-key" || reason == "unreachable"
 }
 
 // fail ends the fake ssh like f.
