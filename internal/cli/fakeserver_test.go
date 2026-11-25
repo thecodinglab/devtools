@@ -46,6 +46,13 @@ type fakeServer struct {
 	hellos    []proto.Hello
 	requests  []string // "type {body}" of every request, in order
 	conns     []net.Conn
+
+	// The live upgrade: the welcome's caps and upgraded, the answer to
+	// server.upgrade, and the acknowledgements that came.
+	caps     []string
+	upgraded *proto.Upgraded
+	upgrade  func(id uint64) proto.Msg
+	acks     []string
 }
 
 func newFakeServer(t *testing.T, snap proto.Snapshot) *fakeServer {
@@ -98,10 +105,6 @@ func (f *fakeServer) handle(conn net.Conn) {
 	f.mu.Lock()
 	f.hellos = append(f.hellos, hello)
 	silent, garbage, refuse := f.silent, f.garbage, f.refuse
-	welcome := proto.Welcome{Gen: proto.Gen, Version: "fake", Boot: "b1", Host: "fakehost", Pid: 1, Client: "c1", Installed: f.installed}
-	if f.version != "" {
-		welcome.Version = f.version
-	}
 	f.mu.Unlock()
 	switch {
 	case silent:
@@ -119,7 +122,13 @@ func (f *fakeServer) handle(conn net.Conn) {
 		proto.WriteMsg(conn, proto.Encode(proto.Refuse{Code: refuse, Text: hello.Pane + " is not the pane of this process"}))
 		return
 	}
-	proto.WriteMsg(conn, proto.Encode(welcome))
+	f.mu.Lock()
+	w := proto.Welcome{Gen: proto.Gen, Version: "fake", Boot: "b1", Host: "fakehost", Pid: 1, Client: "c1", Caps: f.caps, Installed: f.installed, Upgraded: f.upgraded}
+	if f.version != "" {
+		w.Version = f.version
+	}
+	f.mu.Unlock()
+	proto.WriteMsg(conn, proto.Encode(w))
 	for {
 		msg, err := proto.ReadMsg(conn)
 		if err != nil {
@@ -127,6 +136,14 @@ func (f *fakeServer) handle(conn net.Conn) {
 		}
 		if msg.T == proto.TypePing {
 			proto.WriteMsg(conn, proto.Encode(proto.Pong{}))
+			continue
+		}
+		if msg.T == proto.TypeServerUpgradeAck {
+			var a proto.ServerUpgradeAck
+			msg.Decode(&a)
+			f.mu.Lock()
+			f.acks = append(f.acks, a.ID)
+			f.mu.Unlock()
 			continue
 		}
 		if msg.ID == 0 {
@@ -159,6 +176,10 @@ func (f *fakeServer) answer(msg proto.Msg) proto.Msg {
 		return proto.OKReply(msg.ID, proto.SessionOpenResult{Session: "s9", Created: true})
 	case proto.TypeSessionClose:
 		return proto.OKReply(msg.ID, proto.SessionCloseResult{Closed: true})
+	case proto.TypeServerUpgrade:
+		if f.upgrade != nil {
+			return f.upgrade(msg.ID)
+		}
 	case proto.TypePaneFocus:
 		var pf proto.PaneFocus
 		msg.Decode(&pf)

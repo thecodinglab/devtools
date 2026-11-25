@@ -12,6 +12,9 @@ package servertest
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -21,7 +24,9 @@ import (
 	"testing"
 	"time"
 
+	"devtools/internal/handover"
 	"devtools/internal/pane"
+	"devtools/internal/platform"
 	"devtools/internal/server"
 	"devtools/internal/testkit"
 	"devtools/internal/vt"
@@ -45,8 +50,35 @@ const stopWait = 10 * time.Second
 type Option func(*config)
 
 type config struct {
-	helper []string // helper name and its arguments
-	opts   []func(*server.Options)
+	helper  []string // helper name and its arguments
+	opts    []func(*server.Options)
+	upgrade bool
+}
+
+// Upgrades returns how many in-process live upgrades completed on the
+// server of socket (WithLiveUpgrade).
+func Upgrades(socket string) int {
+	runs.Lock()
+	defer runs.Unlock()
+	if r := runs.m[socket]; r != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.count
+	}
+	return 0
+}
+
+var runs struct {
+	sync.Mutex
+	m map[string]*running
+}
+
+// WithLiveUpgrade lets the server upgrade itself live, in this process:
+// server.upgrade with force hands the panes, the model and the listener to
+// a new server of the same options (Upgrade, adopt.go), as the exec of boot
+// hands them to a new image. Without -force it answers "current".
+func WithLiveUpgrade() Option {
+	return func(c *config) { c.upgrade = true }
 }
 
 // WithHelper names the helper program the panes run (10.1.3), with its
@@ -120,6 +152,10 @@ func Start(t *testing.T, dir string, opts ...Option) (socket string) {
 	o.Version = Version
 	o.Host = Host
 	o.Log = slog.New(slog.NewTextHandler(log, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	run := &running{}
+	if c.upgrade {
+		inProcessUpgrade(t, &o, run)
+	}
 	for _, f := range c.opts {
 		f(&o)
 	}
@@ -140,9 +176,18 @@ func Start(t *testing.T, dir string, opts ...Option) (socket string) {
 		srv.Shutdown()
 		t.Fatalf("servertest: %v", err)
 	}
-	served := make(chan error, 1)
-	go func() { served <- srv.Serve(ln) }()
+	run.serve(srv, ln)
+	runs.Lock()
+	if runs.m == nil {
+		runs.m = map[string]*running{}
+	}
+	runs.m[socket] = run
+	runs.Unlock()
 	t.Cleanup(func() {
+		runs.Lock()
+		delete(runs.m, socket)
+		runs.Unlock()
+		srv, served := run.current()
 		srv.Shutdown()
 		select {
 		case err := <-served:
@@ -152,6 +197,7 @@ func Start(t *testing.T, dir string, opts ...Option) (socket string) {
 		case <-time.After(stopWait):
 			t.Errorf("servertest: Serve did not return within %v of Shutdown", stopWait)
 		}
+		run.closeAll()
 		ln.Close()
 		os.Remove(socket)
 		if t.Failed() {
@@ -159,6 +205,147 @@ func Start(t *testing.T, dir string, opts ...Option) (socket string) {
 		}
 	})
 	return socket
+}
+
+// running is the server that serves now: the first one, or the one the
+// last in-process upgrade made.
+type running struct {
+	mu     sync.Mutex
+	srv    *server.Server
+	served chan error
+	extra  []io.Closer // listeners of the upgrades
+	count  int         // completed upgrades
+}
+
+func (r *running) serve(srv *server.Server, ln net.Listener) {
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	r.mu.Lock()
+	r.srv, r.served = srv, served
+	r.mu.Unlock()
+}
+
+func (r *running) current() (*server.Server, chan error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.srv, r.served
+}
+
+func (r *running) closeAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.extra {
+		c.Close()
+	}
+}
+
+// inProcessUpgrade sets the options of the live upgrade so that it happens
+// in this process: the installed build is the test binary itself, its
+// upgrade-check is answered in-process, and the exec stages and commits a
+// new server from the payload, on a duplicate of the listener.
+func inProcessUpgrade(t *testing.T, o *server.Options, run *running) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := platform.FileIdentity(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Program, o.Self, o.UpgradeForce = self, id, true
+	// The builds the tests install are no programs: the watch of the
+	// installed build labels them without running one.
+	o.InstalledVersion = func(context.Context, string) (string, error) { return "test", nil }
+	o.Check = func(ctx context.Context, path string, args []string) ([]byte, error) {
+		for i, a := range args {
+			if a == "--sample" && i+3 < len(args) {
+				b, err := os.ReadFile(args[i+1])
+				if err != nil {
+					return nil, err
+				}
+				got, err := server.ReadSample(args[i+3], b)
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(got)
+			}
+		}
+		return json.Marshal(server.LocalCheck(o.Version))
+	}
+	o.Exec = func(h *server.Handover) error {
+		return execInProcess(t, *o, h, run)
+	}
+}
+
+// execInProcess does what boot's exec and the new image do, in this
+// process: duplicate the kept descriptors, write the payload, stage, and
+// only then accept and commit.
+func execInProcess(t *testing.T, o server.Options, h *server.Handover, run *running) error {
+	var dups []*os.File
+	fail := func(err error) error {
+		for _, f := range dups {
+			f.Close()
+		}
+		return err
+	}
+	masters := map[int]*os.File{}
+	for i, m := range h.Masters {
+		if m == nil {
+			continue
+		}
+		fd, err := platform.DupFile(m)
+		if err != nil {
+			return fail(err)
+		}
+		f := os.NewFile(uintptr(fd), "/dev/ptmx")
+		dups = append(dups, f)
+		masters[fd] = f
+		h.Header.Panes[i].Master = fd
+	}
+	payload, err := os.CreateTemp(o.StateDir, "handover-*")
+	if err != nil {
+		return fail(err)
+	}
+	os.Remove(payload.Name())
+	defer payload.Close()
+	if err := h.Data.Write(payload, h.Header); err != nil {
+		return fail(err)
+	}
+	r, err := handover.Open(payload)
+	if err != nil {
+		return fail(err)
+	}
+	run.mu.Lock()
+	old := run.srv
+	run.mu.Unlock()
+	ln, err := old.Listener()
+	if err != nil {
+		return fail(err)
+	}
+	lfd, err := platform.DupConn(ln)
+	if err != nil {
+		return fail(err)
+	}
+	lf := os.NewFile(uintptr(lfd), "listener")
+	nl, err := net.FileListener(lf)
+	lf.Close()
+	if err != nil {
+		return fail(err)
+	}
+	staged, err := server.Stage(o, r, masters)
+	if err != nil {
+		nl.Close()
+		return fail(err)
+	}
+	h.Accept()
+	srv := staged.Commit()
+	run.mu.Lock()
+	run.extra = append(run.extra, nl)
+	run.count++
+	run.mu.Unlock()
+	nl.(*net.UnixListener).SetDeadline(time.Time{})
+	run.serve(srv, nl)
+	return server.ErrHandedOver
 }
 
 // logBuffer collects the server's log; it is written from many goroutines.

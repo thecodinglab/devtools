@@ -34,6 +34,13 @@ func (s *Server) Shutdown() {
 func (s *Server) shutdown() {
 	defer close(s.stopped)
 
+	// A live upgrade in progress rolls back first: no pane stays frozen,
+	// and none starts after this.
+	s.up.mu.Lock()
+	s.stopping.Store(true)
+	s.up.mu.Unlock()
+	s.abortUpgrade()
+
 	// Stop accepting.
 	s.mu.Lock()
 	s.stopping.Store(true)

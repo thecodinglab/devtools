@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -599,5 +600,27 @@ func TestTitlesAreSanitised(t *testing.T) {
 	ch := s.Title("p1", "hello\x07world")
 	if len(ch) != 1 || ch[0].State.Title != "helloworld" {
 		t.Fatalf("Set.Title: %+v", ch)
+	}
+}
+
+func TestAnExportedSetImportsToTheSameState(t *testing.T) {
+	now := time.Unix(1000, 0)
+	clock := func() time.Time { return now }
+	a := NewSet(clock)
+	a.Procs("p1", []Proc{{Name: "claude", Args: []string{"claude"}}})
+	a.Report("p1", Report{State: "working", Kind: "claude"})
+	a.Title("p2", "plain")
+	now = now.Add(100 * time.Millisecond)
+	a.Report("p1", Report{State: "idle", Kind: "claude"}) // pending: out of working, debounced
+	b := NewSet(clock)
+	b.Import(a.Export())
+	if got, want := b.All(), a.All(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("imported %+v, want %+v", got, want)
+	}
+	now = now.Add(time.Second)
+	ca, na := a.Tick()
+	cb, nb := b.Tick()
+	if !reflect.DeepEqual(ca, cb) || !na.Equal(nb) {
+		t.Fatalf("Tick after import %+v %v, want %+v %v", cb, nb, ca, na)
 	}
 }

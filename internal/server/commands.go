@@ -42,6 +42,10 @@ func (c *core) handle(cn *conn, m proto.Msg) {
 		}
 		return
 	}
+	if m.T == proto.TypeServerUpgrade {
+		c.serverUpgrade(cn, m)
+		return
+	}
 	if c.viewMsg(cn, m) {
 		return
 	}

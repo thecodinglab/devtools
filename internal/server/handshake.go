@@ -137,6 +137,7 @@ func (c *core) admit(nc net.Conn, h proto.Hello) (*conn, string, string) {
 		Client:    cn.id,
 		Clients:   c.reg.interactive(),
 		Installed: c.installed,
+		Upgraded:  c.s.lastUpgrade(),
 	}))
 	if cn.kind == proto.KindInteractive {
 		c.send(cn, proto.Encode(c.snapshot()))
@@ -174,9 +175,13 @@ func (c *core) paneOfProcess(id string, ancestors []int) bool {
 }
 
 // caps are welcome.caps: stateget, tree and update, which the core
-// implements, and what the extensions add.
+// implements, upgrade when the server can upgrade itself live, and what
+// the extensions add.
 func (c *core) caps() []string {
 	caps := []string{proto.CapStateGet, proto.CapTree, proto.CapUpdate}
+	if c.s.canUpgrade() {
+		caps = append(caps, proto.CapUpgrade)
+	}
 	for _, x := range extensionCaps() {
 		if !slices.Contains(caps, x) {
 			caps = append(caps, x)

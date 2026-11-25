@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,6 +22,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// Never ask a service manager, not even read-only: the tests of server
+	// restart set the pid the fake service runs.
+	servicePid = func() (int, error) { return 0, errors.New("no service manager in the tests") }
+	restartService = func() error { return errors.New("no service manager in the tests") }
+	startService = func() error { return errors.New("no service manager in the tests") }
 	// Keep tests hermetic: never read the developer's real config file.
 	os.Setenv("DEVTOOLS_CONFIG", filepath.Join(tmp, "config"))
 	// Nor drive the herdr session the tests may run in: without a fake herdr

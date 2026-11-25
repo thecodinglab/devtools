@@ -1,0 +1,1 @@
+{"t":"welcome","gen":1,"version":"0.1.0+04c5fef","caps":["upgrade","stateget","tree"],"boot":"b3f1c2","host":"desktop","pid":4242,"client":"c7","clients":2,"upgraded":{"attempt":"9f86d081884c7d65","from":"0.1.0+04c5fef","to":"0.1.0+1a2b3c4","at":1795000000000,"kept":3}}

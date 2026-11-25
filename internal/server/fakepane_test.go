@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -745,3 +747,10 @@ func (fp *fakePanes) list() []*fakePane {
 	defer fp.mu.Unlock()
 	return append([]*fakePane(nil), fp.all...)
 }
+
+// The live upgrade: a fake pane cannot be handed over.
+func (f *fakePane) Freeze(ctx context.Context) (pane.Frozen, error) {
+	return pane.Frozen{}, errors.New("fake pane: no live upgrade")
+}
+func (f *fakePane) Thaw()    {}
+func (f *fakePane) Abandon() {}

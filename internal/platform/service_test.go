@@ -42,3 +42,21 @@ func TestRestartRunsTheRestartArgv(t *testing.T) {
 		t.Errorf("Restart ran %q, want %q", ran, RestartArgv(os.Getuid()))
 	}
 }
+
+// Start never restarts: it is the start of a stopped service (no -k, no
+// restart), through the same injection point.
+func TestStartArgvNeverRestarts(t *testing.T) {
+	if got, want := startArgv("linux", 501), []string{"systemctl", "--user", "start", SystemdUnit}; !slices.Equal(got, want) {
+		t.Errorf("linux: %q, want %q", got, want)
+	}
+	if got, want := startArgv("darwin", 501), []string{"launchctl", "kickstart", "gui/501/" + LaunchdLabel}; !slices.Equal(got, want) {
+		t.Errorf("darwin: %q, want %q", got, want)
+	}
+	var ran []string
+	old := runRestart
+	runRestart = func(argv []string) error { ran = argv; return nil }
+	t.Cleanup(func() { runRestart = old })
+	if err := Start(); err != nil || !slices.Equal(ran, StartArgv(os.Getuid())) {
+		t.Errorf("Start ran %q (%v)", ran, err)
+	}
+}

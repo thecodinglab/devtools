@@ -78,7 +78,7 @@ devtools keys
 devtools session list --json
 devtools pane list --json
 devtools pane focus --direction left|right|up|down
-devtools server [status [--json] | restart [--yes]]
+devtools server [status [--json] | restart [--yes] [--cold]]
 devtools version
 devtools bookmark add <name> [path]
 devtools bookmark remove <name>
@@ -331,9 +331,9 @@ bind alt+H resize-left 2
 
 ### `server`
 
-`devtools server` is the server; the service manager runs it. `devtools server status` says whether it runs (exit 0) or not (exit 1, with the command that starts it); `devtools server restart` restarts the service, after asking when programs are running in it (`--yes` does not ask). A session survives a restart as its directory and layout; the programs in it start again.
+`devtools server` is the server; the service manager runs it. `devtools server status` says whether it runs (exit 0) or not (exit 1, with the command that starts it), how its last upgrade went, and whether another build is installed.
 
-An update of devtools does not restart the server, so that it keeps the shells: the server goes on running the build it was started with until `devtools server restart`. `devtools server status` says when the server itself saw another build installed:
+An update of devtools does not restart the server on its own, so that it keeps the shells: the server goes on running the build it was started with until `devtools server restart` upgrades it live (below). `devtools server status` says when the server itself saw another build installed:
 
 ```text
 running, pid 4242, version 0.1.0+6ee3170, protocol 1
@@ -343,11 +343,26 @@ The server runs 0.1.0+6ee3170, but 0.1.0+04c5fef is installed.
 Run devtools server restart to start the installed one.
 ```
 
-When only this devtools is another version than the server (a build of a worktree, say, or a server from before the watch, which says nothing), it says `The server runs 0.1.0+6ee3170, and this devtools is 0.1.0+04c5fef-dirty.` and no more: that is not a pending restart.
+After a live upgrade the server runs the installed build, so this is gone at once, and status says `upgraded from 0.1.0+6ee3170 2m0s ago, 9 programs kept` instead, or why the last upgrade failed. When only this devtools is another version than the server (a build of a worktree, say, or a server from before the watch, which says nothing), it says `The server runs 0.1.0+6ee3170, and this devtools is 0.1.0+04c5fef-dirty.` and no more: that is not a pending restart.
 
-`--json` prints the same as one object: `pid`, `version` (the server's), `gen`, `boot`, `sessions`, `panes`, `clients`, `socket`, and `cli_version` (this devtools), `installed` (the build the server saw installed, `""` when none, `unknown` for one whose version does not tell it from the running one), `restart_pending` (true when the server saw another build installed) and `cli_differs` (true when this devtools is another version than the server).
+`--json` prints the same as one object: `pid`, `version` (the server's), `gen`, `boot`, `sessions`, `panes`, `clients`, `socket`, `upgraded` (the last live upgrade, absent when there was none), and `cli_version` (this devtools), `installed` (the build the server saw installed, `""` when none, `unknown` for one whose version does not tell it from the running one), `restart_pending` (true when the server saw another build installed) and `cli_differs` (true when this devtools is another version than the server).
 
-The server notices an update itself: every 10 seconds it looks where the devtools it was started through (the one on the profile, a symlink that follows the active generation) points, and when that is another file than the one it runs it asks it for its version (a build that prints the running version, as two dirty builds of one commit do, is `unknown`). While an update waits for a restart, the status row of every devtools window shows `↑ update` in the right group, and `prefix ?` ends its hints with `↑ update installed, run devtools server restart`. Another machine whose server waits for a restart is marked `↑` after its name in the status row, and in the hub its heading says `update installed, restart pending`; the hub also names the version of another machine's server when it is not the one this machine's server runs, `macmini   0.1.0+6ee3170` say. A server or a client from before this works with one from after it in both directions; it just does not say any of this.
+The server notices an update itself: every 10 seconds it looks where the devtools it was started through (the one on the profile, a symlink that follows the active generation) points, and when that is another file than the one it runs it asks it for its version (a build that prints the running version, as two dirty builds of one commit do, is `unknown`). While an update waits for a restart, the status row of every devtools window shows `↑ update` in the right group, and `prefix ?` ends its hints with `↑ update installed, run devtools server restart`; the windows that reconnect after a live upgrade lose it. Another machine whose server waits for a restart is marked `↑` after its name in the status row, and in the hub its heading says `update installed, restart pending`; the hub also names the version of another machine's server when it is not the one this machine's server runs, `macmini   0.1.0+6ee3170` say. A server or a client from before this works with one from after it in both directions; it just does not say any of this.
+
+`devtools server restart` upgrades the server to the devtools that is installed now, in place: the server hands its sessions, its panes and their terminals to the new build in the same process (same pid, so launchd and systemd notice nothing), and every program keeps running with its screen, its scrollback, its modes and the input it had not read yet. Windows lose their connection for about half a second and reconnect by themselves; a window shows "<machine> upgraded to <version>." Keys typed in that half second are dropped. The command prints both versions and waits for the outcome:
+
+- the server already runs the installed build: it says so and does nothing (exit 0);
+- the installed build cannot take the programs over (an older devtools without the live upgrade, another system, a protocol the open windows do not speak, a terminal format it cannot read): it says why, then asks and restarts the service as before (`--yes` does not ask);
+- the exec of the new build fails, or the new build cannot take over and gives the process back to the old one: the server goes on with the old build and every program still runs (exit 1);
+- neither build can take over: the server starts cold, as after a restart, and the programs start again (exit 1). This is never chosen while the old build can still take the programs back.
+
+`devtools server restart --cold` is the restart of before: it ends every program, after asking when programs are running (`--yes` does not ask). A session survives it as its directory and layout; the programs in it start again. Both restart the service only when the server that answered is the one the service manager runs.
+
+What a live upgrade does not carry: the connections of the windows (they reconnect), the environment of the service (an environment change in `programs.devtools.server.environment` needs `--cold`), a bell or a clipboard write of the moment of the handover, and, on macOS, the last output of a program that ends in the fraction of a second the new build takes to start. The first upgrade from a build without the live upgrade restarts the programs. A libghostty update that changes its snapshot format cannot be taken over live; restart says so and offers `--cold`.
+
+The server can also upgrade itself once the watch above sees a new devtools installed: the build must be in the Nix store and stay the same file for 30 seconds, and the server waits for a moment in which no window had input for 3 seconds (at most an hour), at most once in 10 minutes, and never tries a build again whose last attempt failed. It upgrades to exactly the file the watch saw, and not at all when the profile moved on meanwhile. It is off by default; `DEVTOOLS_AUTO_UPGRADE=1` in `programs.devtools.server.environment` turns it on.
+
+Every attempt is recorded in `upgrade.json` in the state directory. A new build that crashes after the handover is recorded as crashed at the next start and never tried automatically again. A build that crashes at every start makes the service manager restart it in a loop, as a broken build does after `--cold`: switch the profile back (`home-manager switch --rollback`, or the previous generation) and the next start runs the old build.
 
 ### `version`
 

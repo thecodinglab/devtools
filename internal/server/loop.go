@@ -53,6 +53,8 @@ type core struct {
 	saveDirty bool // a change since the last save was handed to the saver
 	saveArmed bool // a save is scheduled
 	final     bool // the stop took the state: nothing is saved any more
+
+	held bool // a live upgrade holds the model (upgrade.go)
 }
 
 // paneRef is one pane object with the cancel of its watch and the number
@@ -89,16 +91,49 @@ func newCore(s *Server, m *model.State) *core {
 // loop runs the functions of the mailbox, in order, until quit. After each
 // it brings what follows from the state up to date: sizes and colours,
 // displayed sets, focus and what the user sees (sync).
+//
+// While a live upgrade holds the model (core.held) the loop takes only the
+// handover's own functions (hmail), and neither the mailbox nor sync: the
+// model, the panes and their sizes stay exactly as the payload says, and
+// what was posted meanwhile runs after a rollback, or never.
 func (s *Server) loop() {
 	defer s.wg.Done()
 	for {
+		if s.core.held {
+			select {
+			case f := <-s.hmail:
+				f(s.core)
+			case <-s.quit:
+				return
+			}
+			continue
+		}
 		select {
 		case f := <-s.mail:
 			f(s.core)
 			s.core.sync()
+		case f := <-s.hmail:
+			f(s.core)
 		case <-s.quit:
 			return
 		}
+	}
+}
+
+// onLoop runs f on the loop through the handover's mailbox and waits for
+// it; false when the loop ended first.
+func (s *Server) onLoop(f func(*core)) bool {
+	done := make(chan struct{})
+	select {
+	case s.hmail <- func(c *core) { f(c); close(done) }:
+	case <-s.quit:
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	case <-s.quit:
+		return false
 	}
 }
 
@@ -217,35 +252,48 @@ func (c *core) spawn(e model.Effect) {
 	}
 	h.setCols(e.Cols)
 	o := c.s.o
-	po := pane.Options{
-		ID:        e.Pane,
-		Dir:       e.Dir,
-		Env:       paneEnv(o.Env, c.helloEnvCopy(), e.Pane, c.s.socketPath()),
-		Cols:      e.Cols,
-		Rows:      e.Rows,
-		History:   o.History,
-		Colors:    c.colorsFor(e.Session),
-		OnReflow:  h.onReflow,
-		KillGrace: o.KillGrace,
-		SyncHold:  o.SyncHold,
-	}
+	po, gen := c.paneOptions(h, e.Pane, e.Dir, e.Session, e.Cols, e.Rows)
+	po.Env = paneEnv(o.Env, c.helloEnvCopy(), e.Pane, c.s.socketPath())
 	po.Argv, po.Arg0 = c.shell()
 	if e.Resume != nil {
 		c.startResumed(&po, e)
 	}
+	c.attach(h, o.NewPane(po), gen)
+}
+
+// paneOptions are the options of a new pane object of the pane id, with
+// the number of the start that makes it: its size, colours, history, the
+// handle's reflow and the notifications to the loop.
+func (c *core) paneOptions(h *handle, id, dir, session string, cols, rows int) (pane.Options, uint64) {
+	o := c.s.o
+	po := pane.Options{
+		ID:        id,
+		Dir:       dir,
+		Cols:      cols,
+		Rows:      rows,
+		History:   o.History,
+		Colors:    c.colorsFor(session),
+		OnReflow:  h.onReflow,
+		KillGrace: o.KillGrace,
+		SyncHold:  o.SyncHold,
+	}
 	c.gen++
-	s, id, gen := c.s, e.Pane, c.gen
+	s, gen := c.s, c.gen
 	po.Notify = func(ev pane.Event) {
 		if ev.Pane == "" {
 			ev.Pane = id
 		}
 		s.postSoon(func(c *core) { c.paneEvent(ev, gen) })
 	}
-	p := o.NewPane(po)
+	return po, gen
+}
+
+// attach makes p the pane object of its handle.
+func (c *core) attach(h *handle, p Pane, gen uint64) {
 	c.s.track(p)
 	cancel := p.Watch(h.wake)
-	c.panes[e.Pane] = paneRef{p: p, cancel: cancel, gen: gen}
-	delete(c.fg, e.Pane)
+	c.panes[h.id] = paneRef{p: p, cancel: cancel, gen: gen}
+	delete(c.fg, h.id)
 	h.swap(p)
 }
 

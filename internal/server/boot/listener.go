@@ -1,8 +1,10 @@
 package boot
 
 import (
+	"errors"
 	"log/slog"
 	"net"
+	"time"
 )
 
 // peerListener is the listener the server is given (SEC2): Accept returns
@@ -57,4 +59,14 @@ func (p *peerListener) allowed(c net.Conn) bool {
 		return false
 	}
 	return true
+}
+
+// SetDeadline sets the deadline of Accept on the listener beneath; the
+// server pauses accepting with it during a live upgrade, so connections
+// wait in the listen backlog (server/upgrade.go).
+func (p *peerListener) SetDeadline(t time.Time) error {
+	if d, ok := p.Listener.(interface{ SetDeadline(time.Time) error }); ok {
+		return d.SetDeadline(t)
+	}
+	return errors.New("boot: the listener has no deadline")
 }

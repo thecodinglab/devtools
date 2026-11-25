@@ -466,9 +466,10 @@ func errorsAs(err error, target **exit) bool {
 // server restart asks [y/N] when programs run, unless --yes.
 func TestServerRestartAsksUnlessYes(t *testing.T) {
 	restarts := 0
-	saved := restartService
+	saved, savedPid := restartService, servicePid
 	restartService = func() error { restarts++; return nil }
-	t.Cleanup(func() { restartService = saved })
+	servicePid = func() (int, error) { return 1, nil } // the fake server's pid: the service's
+	t.Cleanup(func() { restartService, servicePid = saved, savedPid })
 	newWorld(t)
 	question := ui.Message("restart", "2", "1")
 
@@ -602,8 +603,11 @@ func TestTheGateRunsBeforeTheCommand(t *testing.T) {
 // server, server status, server restart and bridge open no backend,
 // whatever multiplexer the caller sits in.
 func TestServerCommandsOpenNoBackend(t *testing.T) {
-	savedRestart, savedServer, savedBridge := restartService, runServer, runBridge
-	t.Cleanup(func() { restartService, runServer, runBridge = savedRestart, savedServer, savedBridge })
+	savedRestart, savedServer, savedBridge, savedPid := restartService, runServer, runBridge, servicePid
+	t.Cleanup(func() {
+		restartService, runServer, runBridge, servicePid = savedRestart, savedServer, savedBridge, savedPid
+	})
+	servicePid = func() (int, error) { return 1, nil }
 	var ran []string
 	restartService = func() error { ran = append(ran, "restart"); return nil }
 	runServer = func(v string) int { ran = append(ran, "server "+v); return 0 }

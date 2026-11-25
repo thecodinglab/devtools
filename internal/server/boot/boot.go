@@ -14,11 +14,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
 
+	"devtools/internal/handover"
 	"devtools/internal/platform"
 	"devtools/internal/proto"
 	"devtools/internal/server"
@@ -98,6 +100,19 @@ type run struct {
 	socket   string
 	lock     *os.File
 	log      *slog.Logger
+
+	// The live upgrade (upgrade.go).
+	argv0     string            // the path this process was started as, made absolute
+	self      platform.Identity // the file this process runs
+	selfErr   error
+	ul        *net.UnixListener // the listener beneath the peer listener
+	execc     chan execReq      // the server's exec requests, to the serve loop
+	serveDone chan struct{}     // closed when the serve loop ended
+	upgrade   *proto.Upgraded   // welcome.upgraded of the server this run starts
+	adopted   bool              // the server was adopted from a handover
+	attempt   string            // the attempt that made it
+	healthy   *time.Timer       // writes "ok" to the journal after the health interval
+	jmu       sync.Mutex        // the writers of the journal take turns
 }
 
 func (r *run) fail(err error) int {
@@ -122,23 +137,104 @@ func (r *run) release() {
 
 func (r *run) main() int {
 	r.log = slog.New(slog.NewTextHandler(stderr, nil)).With("component", "server")
+	// The file this process runs, at once, and the path the service started
+	// it through, before step 7 changes the directory: the server watches
+	// that path for an installed update and upgrades to what it names
+	// (upgrade.go).
+	r.self, r.selfErr = selfExecutable()
+	r.argv0 = absArgv0(os.Args[0])
+	r.execc = make(chan execReq)
+	r.serveDone = make(chan struct{})
 
-	// Where the service started this binary from, before step 7 changes the
-	// directory: the server watches it for an installed update.
-	program, executable := programPath(), executablePath()
+	// (8, first) SIGHUP is handled and does nothing (not ignored, so
+	// children do not inherit an ignored SIGHUP); SIGTERM and SIGINT shut
+	// down. They are taken from the first moment, so a stop that arrives
+	// while a new image adopts the panes waits in the channel.
+	sigs := make(chan os.Signal, 8)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigs)
 
+	if v, ok := os.LookupEnv(handover.EnvVar); ok {
+		os.Unsetenv(handover.EnvVar)
+		return r.adopt(v, sigs)
+	}
+	return r.start(sigs)
+}
+
+// start is a start without a handover: the steps of 3.9 from the first.
+func (r *run) start(sigs chan os.Signal) int {
+	if err := r.preconditions(); err != nil {
+		return r.fail(err)
+	}
+	// (4) An exclusive lock on server.lock.
+	lockPath := filepath.Join(r.stateDir, LockName)
+	if r.lock == nil {
+		lock, err := platform.Lock(lockPath)
+		if errors.Is(err, platform.ErrLocked) {
+			return r.fail(failf("a server is already running (%s is locked)", lockPath))
+		}
+		if err != nil {
+			return r.fail(failf("cannot lock %s: %v", lockPath, err))
+		}
+		r.lock = lock
+	}
+	// This start holds the lock without a handover: a live upgrade the
+	// journal still calls pending or committed ended with its process.
+	handover.Update(r.stateDir, func(j *handover.Journal) {
+		if a, ok := j.ColdStart(time.Now().UnixMilli()); ok {
+			r.log.Error("upgrade: the last live upgrade did not survive", "attempt", a.ID, "target", a.Target, "reason", a.Reason)
+		}
+	})
+
+	// (5) An existing socket file: accepted is an error, refused removes it.
+	if err := clearStaleSocket(r.socket); err != nil {
+		return r.fail(err)
+	}
+
+	if err := r.environment(); err != nil {
+		return r.fail(err)
+	}
+
+	// (9) The emulator identity, once, before the first terminal exists.
+	host := shortHost()
+	setIdentity("devtools", r.version, host)
+
+	// (10) Load the state, listen with mode 0600, serve.
+	o := r.options(host)
+	srv, err := newServer(o)
+	if err != nil {
+		return r.fail(failf("cannot start: %v", err))
+	}
+	if r.upgrade != nil {
+		if s, ok := srv.(interface{ SetUpgraded(proto.Upgraded) }); ok {
+			s.SetUpgraded(*r.upgrade)
+		}
+	}
+	l, err := listen(r.socket)
+	if err != nil {
+		return r.fail(err)
+	}
+	r.ul, _ = l.(*net.UnixListener)
+	r.log.Info("listening", "socket", r.socket, "version", r.version, "pid", os.Getpid())
+
+	return r.serve(srv, newPeerListener(l, ownUID(), peerUID, r.log), sigs)
+}
+
+// preconditions are steps 1 to 3: the shell, the state directory and the
+// socket path.
+func (r *run) preconditions() error {
 	// (1) SHELL is set and executable.
 	if err := checkShell(os.Getenv("SHELL")); err != nil {
-		return r.fail(err)
+		return err
 	}
 
 	// (2) The state directory exists, is 0700 and belongs to the user.
 	dir, err := proto.StateDir()
 	if err != nil {
-		return r.fail(failf("no state directory: %v", err))
+		return failf("no state directory: %v", err)
 	}
 	if err := ensureStateDir(dir); err != nil {
-		return r.fail(err)
+		return err
 	}
 	r.stateDir = dir
 
@@ -146,38 +242,27 @@ func (r *run) main() int {
 	// private as the state directory (SEC2).
 	sock, err := proto.SocketPath()
 	if err != nil {
-		return r.fail(failf("no socket path: %v", err))
+		return failf("no socket path: %v", err)
 	}
 	if n := len(sock); n > MaxSocketPath {
-		return r.fail(failf("the socket path %s is %d bytes, longer than the %d a unix socket allows", sock, n, MaxSocketPath))
+		return failf("the socket path %s is %d bytes, longer than the %d a unix socket allows", sock, n, MaxSocketPath)
 	}
 	if sd := filepath.Dir(sock); sd != filepath.Clean(dir) {
 		if err := checkPrivateDir(sd); err != nil {
-			return r.fail(err)
+			return err
 		}
 	}
 	r.socket = sock
+	return nil
+}
 
-	// (4) An exclusive lock on server.lock.
-	lockPath := filepath.Join(dir, LockName)
-	lock, err := platform.Lock(lockPath)
-	if errors.Is(err, platform.ErrLocked) {
-		return r.fail(failf("a server is already running (%s is locked)", lockPath))
-	}
-	if err != nil {
-		return r.fail(failf("cannot lock %s: %v", lockPath, err))
-	}
-	r.lock = lock
-
-	// (5) An existing socket file: accepted is an error, refused removes it.
-	if err := clearStaleSocket(sock); err != nil {
-		return r.fail(err)
-	}
-
+// environment is steps 6 and 7: the open-file limit, the session and the
+// home directory.
+func (r *run) environment() error {
 	// (6) Raise the open-file limit.
 	got, err := platform.RaiseFDLimit(FDLimit)
 	if err != nil {
-		return r.fail(failf("cannot raise the open-file limit to %d: %v", FDLimit, err))
+		return failf("cannot raise the open-file limit to %d: %v", FDLimit, err)
 	}
 	if got < FDLimit {
 		r.log.Warn("open-file limit below the wanted value", "limit", got, "want", FDLimit)
@@ -189,47 +274,34 @@ func (r *run) main() int {
 	}
 	home, err := homeDir()
 	if err != nil {
-		return r.fail(err)
+		return err
 	}
 	if err := os.Chdir(home); err != nil {
-		return r.fail(failf("cannot change to the home directory %s: %v", home, err))
+		return failf("cannot change to the home directory %s: %v", home, err)
 	}
+	return nil
+}
 
-	// (8) SIGHUP is handled and does nothing (not ignored, so children do
-	// not inherit an ignored SIGHUP); SIGTERM and SIGINT shut down. Signals
-	// that arrive before the server serves wait in the channel.
-	sigs := make(chan os.Signal, 8)
-	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
-	defer signal.Stop(sigs)
-
-	// (9) The emulator identity, once, before the first terminal exists.
-	host := shortHost()
-	setIdentity("devtools", r.version, host)
-
-	// (10) Load the state, listen with mode 0600, serve.
+// options are the server's options of step 10.
+func (r *run) options(host string) server.Options {
 	o := server.Defaults()
-	o.StateDir = dir
+	o.StateDir = r.stateDir
 	o.Env = os.Environ()
 	o.Version = r.version
 	o.Host = host
-	o.Program, o.Executable = program, executable
+	o.Program = r.argv0
+	if r.selfErr == nil {
+		o.Self = r.self
+	}
 	o.Log = r.log
-	srv, err := newServer(o)
-	if err != nil {
-		return r.fail(failf("cannot start: %v", err))
-	}
-	l, err := listen(sock)
-	if err != nil {
-		return r.fail(err)
-	}
-	r.log.Info("listening", "socket", sock, "version", r.version, "pid", os.Getpid())
-
-	return r.serve(srv, newPeerListener(l, ownUID(), peerUID, r.log), sigs)
+	r.upgradeOptions(&o)
+	return o
 }
 
 // serve runs the server until a signal or its own end, then the stop
 // steps of boot: remove the socket, release the lock.
-func (r *run) serve(srv Server, l net.Listener, sigs <-chan os.Signal) int {
+func (r *run) serve(srv Server, l net.Listener, sigs chan os.Signal) int {
+	defer close(r.serveDone)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(l) }()
 
@@ -255,6 +327,18 @@ func (r *run) serve(srv Server, l net.Listener, sigs <-chan os.Signal) int {
 				continue // handled, nothing to do
 			}
 			stop(sig.String())
+		case req := <-r.execc:
+			// The live upgrade: the serve loop is the one owner of stop
+			// against exec, and the only reader of sigs.
+			if stopped != nil {
+				req.reply <- errStopping
+				continue
+			}
+			err, sig := r.execStep(req.h, sigs)
+			req.reply <- err
+			if sig != nil {
+				stop(sig.String())
+			}
 		case err := <-served:
 			status := 0
 			if stopped == nil {
@@ -272,6 +356,7 @@ func (r *run) serve(srv Server, l net.Listener, sigs <-chan os.Signal) int {
 			if err := os.Remove(r.socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 				r.log.Warn("cannot remove the socket", "socket", r.socket, "err", err.Error())
 			}
+			r.stopped()
 			r.release()
 			// The stop is complete: a caller that does not exit at once (a
 			// test) must not be ended by the watchdog later.
@@ -289,6 +374,8 @@ func (r *run) waitStopped(stopped <-chan struct{}, sigs <-chan os.Signal) {
 		case <-stopped:
 			return
 		case <-sigs:
+		case req := <-r.execc:
+			req.reply <- errStopping
 		}
 	}
 }
@@ -509,26 +596,4 @@ func oneLine(s string) string {
 		}
 		return r
 	}, s)
-}
-
-// programPath is the path the service started this binary through, absolute:
-// argv[0], which nix/service.nix sets to the devtools of the profile, a
-// symlink that follows the active generation. "" when argv[0] is a bare
-// name, found in PATH by whoever started it: then nothing is watched.
-func programPath() string {
-	if len(os.Args) == 0 || !strings.Contains(os.Args[0], "/") {
-		return ""
-	}
-	abs, err := filepath.Abs(os.Args[0])
-	if err != nil {
-		return ""
-	}
-	return abs
-}
-
-// executablePath is the file whose image runs, as the kernel names it and
-// not through the symlink the service started it by: "" when it cannot be
-// told (platform.RunningExecutable).
-func executablePath() string {
-	return platform.RunningExecutable()
 }

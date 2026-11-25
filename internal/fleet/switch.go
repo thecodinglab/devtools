@@ -60,16 +60,17 @@ func init() {
 // view is the committed view: what the window shows, or showed before its
 // link was lost.
 type view struct {
-	mc     *machine
-	target session.Target // Machine, Session (the server's id), Tab, Pane
-	ok     proto.ViewOK
-	id     uint64 // the view.set that made the server show it
-	boot   string // welcome.boot of the server that showed it
-	label  string
-	stale  bool
-	prob   hub.Problem
-	gone   bool // the session cannot come back: a rollback to it ends in none
-	resume bool // the link came back while a switch away from the stale view ran
+	mc      *machine
+	target  session.Target // Machine, Session (the server's id), Tab, Pane
+	ok      proto.ViewOK
+	id      uint64 // the view.set that made the server show it
+	boot    string // welcome.boot of the server that showed it
+	version string // welcome.version of that server
+	label   string
+	stale   bool
+	prob    hub.Problem
+	gone    bool // the session cannot come back: a rollback to it ends in none
+	resume  bool // the link came back while a switch away from the stale view ran
 
 	// view.set requests for other targets sent on mc's link that were not
 	// refused yet: while one is out, the server may show something else
@@ -675,7 +676,7 @@ func (s *switcher) commit() {
 		s.f.send(old.mc, proto.Encode(proto.ViewClear{}))
 	}
 	t := session.Target{Machine: p.mc.name, Session: p.ok.Session, Tab: p.ok.Tab, Pane: p.target.Pane}
-	c := &view{mc: p.mc, target: t, ok: p.ok, id: p.id, boot: p.mc.welcome.Boot}
+	c := &view{mc: p.mc, target: t, ok: p.ok, id: p.id, boot: p.mc.welcome.Boot, version: p.mc.welcome.Version}
 	if p.mc.st != nil {
 		c.label = p.mc.st.Sessions[p.ok.Session].Label
 	}
@@ -986,7 +987,13 @@ func (s *switcher) resumeStale() {
 	if mc.welcome.Boot == c.boot {
 		if _, ok := st.Sessions[c.target.Session]; ok {
 			t := session.Target{Machine: mc.name, Session: c.target.Session}
-			s.start(mc, t, kindResume, "")
+			// The same server process with another build: it upgraded
+			// itself live, and the programs kept running.
+			notice := ""
+			if c.version != "" && mc.welcome.Version != c.version && mc.welcome.Upgraded != nil && mc.welcome.Upgraded.Error == "" {
+				notice = ui.Notice("upgraded", s.name(mc), mc.welcome.Version)
+			}
+			s.start(mc, t, kindResume, notice)
 			return
 		}
 	} else if _, ok := sessionOfDir(mc, c.ok.Dir); ok {

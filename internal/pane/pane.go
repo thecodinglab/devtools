@@ -66,10 +66,15 @@ type Pane struct {
 	shut     bool // Close ended the watchers
 	lastSize [2]int
 
-	procMu  sync.Mutex
-	reaped  bool
-	reapedc chan struct{}
-	closing atomic.Bool
+	procMu     sync.Mutex
+	reaped     bool
+	waitStatus *Exit // the exit, once reaped (guarded by procMu)
+	abandoned  bool  // a live upgrade in this process adopted the child (guarded by procMu)
+	reapedc    chan struct{}
+	closing    atomic.Bool
+
+	fzMu sync.Mutex
+	fz   *freezeState // set between Freeze and Thaw (handover.go)
 
 	exited     chan struct{} // closed once the exit is known
 	quit       chan struct{} // closed by Close: the actor ends
@@ -103,6 +108,41 @@ type input struct {
 // Start never fails: when the program cannot be started the pane is already
 // exited and Info().Exit.Text says why.
 func Start(o Options) *Pane {
+	p := newPane(o)
+	p.a = newActor(p)
+
+	if err := p.spawn(); err != nil {
+		p.info = Info{State: "exited", Exit: &Exit{Code: -1, Text: err.Error()}}
+		p.runExited()
+		return p
+	}
+	p.run()
+	return p
+}
+
+// run starts the goroutines of a running pane.
+func (p *Pane) run() {
+	go p.a.run()
+	go p.read()
+	go p.write()
+	go p.wait()
+}
+
+// runExited starts the actor of a pane without a program: one that could
+// not start, or one restored exited (handover.go). It reports Exited once.
+func (p *Pane) runExited() {
+	close(p.exited)
+	close(p.reapedc)
+	close(p.readerDone)
+	close(p.writerDone)
+	close(p.waiterDone)
+	p.a.exited, p.a.spawnFailed = true, true
+	go p.a.run()
+}
+
+// newPane is the pane object of Start and of an adoption, without its
+// terminal and its goroutines.
+func newPane(o Options) *Pane {
 	if o.KillGrace <= 0 {
 		o.KillGrace = defaultKillGrace
 	}
@@ -134,23 +174,6 @@ func Start(o Options) *Pane {
 	p.size = [2]int{o.Cols, o.Rows}
 	p.lastSize = p.size
 	p.info = Info{State: "running"}
-	p.a = newActor(p)
-
-	if err := p.spawn(); err != nil {
-		p.info = Info{State: "exited", Exit: &Exit{Code: -1, Text: err.Error()}}
-		close(p.exited)
-		close(p.reapedc)
-		close(p.readerDone)
-		close(p.writerDone)
-		close(p.waiterDone)
-		p.a.exited, p.a.spawnFailed = true, true
-		go p.a.run()
-		return p
-	}
-	go p.a.run()
-	go p.read()
-	go p.write()
-	go p.wait()
 	return p
 }
 
@@ -474,6 +497,11 @@ func (p *Pane) Close() {
 
 func (p *Pane) close() {
 	defer close(p.closed)
+	// A pane frozen for a live upgrade that did not happen goes on first,
+	// so its waiter can reap.
+	if fz := p.freezing(); fz != nil && !fz.abandoned.Load() {
+		p.Thaw()
+	}
 	if p.master != nil {
 		p.closing.Store(true)
 	steps:

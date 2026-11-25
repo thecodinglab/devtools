@@ -38,6 +38,9 @@ type conn struct {
 
 	viewp   atomic.Pointer[viewState] // the view as the reader sees it
 	pasting map[string]bool           // panes with a paste open (the reader's)
+	// pasteOpen is len(pasting) > 0, published by the reader for the
+	// upgrade's gate and idle watch, which must not read the map.
+	pasteOpen atomic.Bool
 }
 
 var _ Conn = (*conn)(nil)
@@ -99,6 +102,10 @@ func (s *Server) read(cn *conn) {
 		m, err := proto.ReadMsg(cn.nc)
 		if err != nil {
 			return
+		}
+		if m.T == proto.TypeServerUpgradeAck {
+			s.upgradeAcked(cn, m) // the loop may be holding for the handover
+			continue
 		}
 		if s.inReader(cn, m) {
 			continue

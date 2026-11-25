@@ -434,7 +434,8 @@ func HintLabel(action, arg string) string {
 // row cuts what is longer. Kinds and arguments: copied (count), unbound
 // (key), no-answer (machine), still-connecting (machine), machine (machine,
 // reason, and for the reason protocol the text), refused (machine, the
-// server's text), keys-dropped, restarted (machine), closed-idle (machine),
+// server's text), keys-dropped, restarted (machine), upgraded (machine,
+// version), closed-idle (machine),
 // self (machine), older-server, bad-frame (machine).
 func Notice(kind string, args ...string) string {
 	arg := func(i int) string { return need("Notice", kind, args, i) }
@@ -460,6 +461,8 @@ func Notice(kind string, args ...string) string {
 		return "Some keys typed during the switch were dropped"
 	case "restarted":
 		return arg(0) + " restarted. Its shells are new."
+	case "upgraded":
+		return arg(0) + " upgraded to " + arg(1) + "."
 	case "closed-idle":
 		return arg(0) + " closed after 10 min idle"
 	case "self":
@@ -479,6 +482,48 @@ func firstSentence(s string) string {
 		return s[:i+1]
 	}
 	return s
+}
+
+// Upgrade is what devtools server restart says about a live upgrade.
+// Kinds and arguments: upgrading (from, to, programs), upgraded (to,
+// programs), current (programs), incompatible (the reason), busy (the
+// reason), failed (the reason), fallback (the reason), cold (the reason),
+// pending, unknown, not-the-service (pid), no-answer (the reason),
+// other-server (pid), no-service (the reason).
+func Upgrade(kind string, args ...string) string {
+	arg := func(i int) string { return need("Upgrade", kind, args, i) }
+	switch kind {
+	case "upgrading":
+		return "Upgrading the devtools server from " + arg(0) + " to " + arg(1) + "; " + plural(arg(2), "program keeps", "programs keep") + " running."
+	case "upgraded":
+		return "The devtools server runs " + arg(0) + " now; " + plural(arg(1), "program", "programs") + " kept running."
+	case "current":
+		return "The server already runs the installed build; nothing to upgrade.\n" +
+			"devtools server restart --cold restarts it and ends " + plural(arg(0), "program", "programs") + "."
+	case "incompatible":
+		return "The installed devtools cannot take over the running programs: " + oneLine(arg(0)) + "."
+	case "busy":
+		return "The devtools server cannot upgrade now: " + oneLine(arg(0)) + ". Try again."
+	case "failed":
+		return "The upgrade failed and the server goes on with the old build; every program still runs: " + oneLine(arg(0)) + "."
+	case "fallback":
+		return "The new build could not take over, so the old build runs again; every program still runs: " + oneLine(arg(0)) + "."
+	case "cold":
+		return "The upgrade failed and the server started cold; the programs of the panes were restarted: " + oneLine(arg(0)) + "."
+	case "pending":
+		return "The upgrade is still in progress; devtools server status shows how it ends."
+	case "unknown":
+		return "The outcome of the upgrade is unknown; devtools server status shows it."
+	case "not-the-service":
+		return "This server (pid " + arg(0) + ") is not the one the service runs; restart it yourself."
+	case "no-answer":
+		return "The devtools server does not answer (" + oneLine(arg(0)) + "); nothing was restarted. It may be upgrading: try again in a moment."
+	case "other-server":
+		return "No server answers at this socket, and the service runs another one (pid " + arg(0) + "); nothing was restarted."
+	case "no-service":
+		return "No server answers, and the service manager does not say whether it runs one; nothing was started: " + oneLine(arg(0)) + "."
+	}
+	panic("ui.Upgrade: unknown kind " + strconv.Quote(kind))
 }
 
 // ConfirmClose is the question of the confirm of closing a pane: 0 the

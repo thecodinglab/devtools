@@ -56,3 +56,7 @@ func clamp(v, lo, hi int) int {
 	}
 	return v
 }
+
+// Gens returns the generations this build speaks, for the preflight of a
+// live upgrade (internal/handover).
+func Gens() []int { return append([]int(nil), gens[:]...) }

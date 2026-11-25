@@ -91,10 +91,13 @@ static bool dt_tr_color_scheme(GhosttyTerminal t, void *ud, GhosttyColorScheme *
 
 #define DT_SET(opt, v) do { if ((r = ghostty_terminal_set(t, opt, (const void *)(v))) < 0) return r; } while (0)
 
-// The host settings of 5.3.2 that New always applies. TITLE_REPORT is left
-// off (the library's default) and CLIPBOARD_READ is not set, so an OSC 52
-// read gets no answer at all.
-static GhosttyResult dt_install(GhosttyTerminal t, uintptr_t h, size_t lines) {
+// The host settings of 5.3.2 that every terminal gets, a new one and one
+// restored from a snapshot (snapshot.go): the userdata, the callbacks and the
+// scrollback limits. They are options of the host, not state of the terminal,
+// so a snapshot does not carry them. TITLE_REPORT is left off (the library's
+// default) and CLIPBOARD_READ is not set, so an OSC 52 read gets no answer at
+// all.
+static GhosttyResult dt_callbacks(GhosttyTerminal t, uintptr_t h, size_t lines) {
 	GhosttyResult r;
 	DT_SET(GHOSTTY_TERMINAL_OPT_USERDATA, (void *)h);
 	DT_SET(GHOSTTY_TERMINAL_OPT_WRITE_PTY, dt_tr_write_pty);
@@ -105,11 +108,24 @@ static GhosttyResult dt_install(GhosttyTerminal t, uintptr_t h, size_t lines) {
 	DT_SET(GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, dt_tr_clipboard);
 	DT_SET(GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, dt_tr_status);
 	DT_SET(GHOSTTY_TERMINAL_OPT_COLOR_SCHEME, dt_tr_color_scheme);
-	GhosttyTerminalModeConfig m = { GHOSTTY_MODE_GRAPHEME_CLUSTER, true };
-	DT_SET(GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &m);
 	size_t nobytes = SIZE_MAX;
 	DT_SET(GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &nobytes);
 	DT_SET(GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &lines);
+	return GHOSTTY_SUCCESS;
+}
+
+// The settings only a new terminal gets: grapheme clustering as the mode's
+// default (OPT_MODE_DEFAULT also sets the current value, terminal.h, so a
+// restored terminal must not get it again: it would undo a program's own
+// choice), and continuation tracking, so that the terminal can be encoded
+// in a snapshot while its parser is in the middle of a sequence (snapshot.h).
+// A restored terminal keeps tracking through the decoder option
+// RETAIN_CONTINUATION instead.
+static GhosttyResult dt_defaults(GhosttyTerminal t, size_t cont) {
+	GhosttyResult r;
+	GhosttyTerminalModeConfig m = { GHOSTTY_MODE_GRAPHEME_CLUSTER, true };
+	DT_SET(GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &m);
+	DT_SET(GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES, &cont);
 	return GHOSTTY_SUCCESS;
 }
 
@@ -228,6 +244,7 @@ static void dt_cursor(GhosttyTerminal t, GhosttyRenderState rs, dt_cursor_t *o) 
 import "C"
 
 import (
+	"errors"
 	"runtime/cgo"
 	"strconv"
 	"strings"
@@ -361,9 +378,47 @@ func New(o Options) Term {
 		what string
 		r    C.GhosttyResult
 	}{
-		{"install", C.dt_install(t.h, C.uintptr_t(t.handle), C.size_t(t.lineLimit(t.cols)))},
+		{"install", C.dt_callbacks(t.h, C.uintptr_t(t.handle), C.size_t(t.lineLimit(t.cols)))},
+		{"defaults", C.dt_defaults(t.h, C.size_t(continuationMax))},
 		// The cell size in pixels; ghostty_terminal_new sets none.
 		{"resize", C.ghostty_terminal_resize(t.h, C.uint16_t(t.cols), C.uint16_t(t.rows), cellWidthPx, cellHeightPx)},
+	}
+	for _, s := range steps {
+		if s.r != C.GHOSTTY_SUCCESS {
+			t.free()
+			panic("vt: " + s.what + ": result " + strconv.Itoa(int(s.r)))
+		}
+	}
+	if err := t.finish(); err != nil {
+		panic(err.Error())
+	}
+	t.historyState.init(t)
+	return t
+}
+
+// callbacks installs the host settings of dt_callbacks on a terminal
+// restored from a snapshot (Restore).
+func (t *term) callbacks() error {
+	if r := C.dt_callbacks(t.h, C.uintptr_t(t.handle), C.size_t(t.lineLimit(t.cols))); r != C.GHOSTTY_SUCCESS {
+		return errors.New("vt: install: result " + strconv.Itoa(int(r)))
+	}
+	return nil
+}
+
+// continuationMax is the longest unfinished sequence a terminal can be
+// encoded in the middle of (dt_defaults); a longer one (an image of the
+// kitty graphics protocol on its way) must end before the pane is frozen
+// (snapshot.go).
+const continuationMax = 1 << 20
+
+// finish creates what New and Restore add to a terminal of the library: the
+// render state, its iterator and cells, the probe of Modes, the colours and
+// the encoders of the input side. On an error it frees the terminal.
+func (t *term) finish() error {
+	steps := []struct {
+		what string
+		r    C.GhosttyResult
+	}{
 		{"render_state_new", C.ghostty_render_state_new(nil, &t.rs)},
 		{"row_iterator_new", C.ghostty_render_state_row_iterator_new(nil, &t.it)},
 		{"row_cells_new", C.ghostty_render_state_row_cells_new(nil, &t.cells)},
@@ -373,16 +428,15 @@ func New(o Options) Term {
 	for _, s := range steps {
 		if s.r != C.GHOSTTY_SUCCESS {
 			t.free()
-			panic("vt: " + s.what + ": result " + strconv.Itoa(int(s.r)))
+			return errors.New("vt: " + s.what + ": result " + strconv.Itoa(int(s.r)))
 		}
 	}
 	// The library answers OSC 10 and 11 only once colours were set through
 	// the API (E10 item 5).
-	t.SetColors(o.Colors)
+	t.SetColors(t.o.Colors)
 	t.replies = nil
 	t.inputState.init(t)
-	t.historyState.init(t)
-	return t
+	return nil
 }
 
 // lineLimit is the library's line limit at a width: History plus the

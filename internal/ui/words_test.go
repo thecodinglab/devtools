@@ -176,6 +176,7 @@ func notices() map[string][]string {
 		"refused":          {machine, "no such session"},
 		"keys-dropped":     nil,
 		"restarted":        {machine},
+		"upgraded":         {machine, "0.1.0+04c5fef"},
 		"closed-idle":      {machine},
 		"self":             {machine},
 		"older-server":     nil,
@@ -219,6 +220,7 @@ func TestEveryNoticeFitsFiftyCells(t *testing.T) {
 		"refused":          "macmini: no such session",
 		"keys-dropped":     "Some keys typed during the switch were dropped",
 		"restarted":        "macmini restarted. Its shells are new.",
+		"upgraded":         "macmini upgraded to 0.1.0+04c5fef.",
 		"closed-idle":      "macmini closed after 10 min idle",
 		"self":             "macmini is this machine and is left out",
 		"older-server":     "Server is older. Run devtools server restart.",
@@ -537,5 +539,24 @@ func TestHintLabelsFollowTheOrderOfTheBindings(t *testing.T) {
 	}
 	if TooSmallNeed != Number(MinCols)+" by "+Number(MinRows)+" needed" {
 		t.Errorf("the too-small text %q does not say the minimum size", TooSmallNeed)
+	}
+}
+
+func TestEveryUpgradeKindHasWords(t *testing.T) {
+	for kind, args := range map[string][]string{
+		"upgrading": {"0.1.0+a", "0.1.0+b", "3"}, "upgraded": {"0.1.0+b", "1"}, "current": {"2"},
+		"incompatible": {"x"}, "busy": {"x"}, "failed": {"x"}, "fallback": {"x"}, "cold": {"x"},
+		"pending": nil, "unknown": nil, "not-the-service": {"42"},
+		"no-answer": {"i/o timeout"}, "other-server": {"42"}, "no-service": {"x"},
+	} {
+		if got := Upgrade(kind, args...); got == "" || strings.Contains(got, "%") {
+			t.Errorf("Upgrade(%q) = %q", kind, got)
+		}
+	}
+	if got, want := Upgrade("upgrading", "a", "b", "1"), "Upgrading the devtools server from a to b; 1 program keeps running."; got != want {
+		t.Errorf("upgrading = %q, want %q", got, want)
+	}
+	if !panics(func() { Upgrade("nope") }) {
+		t.Errorf("an unknown kind does not panic")
 	}
 }

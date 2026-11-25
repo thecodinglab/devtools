@@ -1,6 +1,8 @@
 package pane
 
 import (
+	"errors"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -13,6 +15,10 @@ import (
 // busy the kernel's PTY buffer fills and the program blocks in write:
 // backpressure without a queue (3.2.1). Any error ends it; on Linux the end
 // of file of a PTY master is EIO.
+//
+// While the pane is frozen for a live upgrade (handover.go) the read ends
+// with the deadline Freeze set: the reader parks until Thaw, or ends for
+// good when the pane is abandoned.
 func (p *Pane) read() {
 	defer close(p.readerDone)
 	buf := make([]byte, readSize)
@@ -23,6 +29,15 @@ func (p *Pane) read() {
 			<-p.ack
 		}
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				if fz := p.freezing(); fz != nil {
+					fz.parkReader()
+					if fz.abandoned.Load() {
+						return
+					}
+				}
+				continue
+			}
 			return
 		}
 	}
@@ -36,6 +51,7 @@ type outQueue struct {
 	size   int
 	closed bool
 	wake   chan struct{}
+	fz     *freezeState // set while frozen: the writer parks (handover.go)
 }
 
 func (q *outQueue) init() { q.wake = make(chan struct{}, 1) }
@@ -81,12 +97,26 @@ func (q *outQueue) shut() {
 // partial write continues where it stopped and EAGAIN and EINTR are retried
 // (os.File does both on a polled descriptor). After a failed write the rest
 // is dropped, so a pane whose terminal is gone never holds its callers.
+//
+// While the pane is frozen for a live upgrade the writer parks: Freeze sets
+// a write deadline, a write it interrupts returns how much it wrote, and
+// the rest of that buffer and of the batch go back to the front of the
+// queue, so the queue holds exactly the bytes the program has not got, in
+// order (handover.go).
 func (p *Pane) write() {
 	defer close(p.writerDone)
 	q := &p.out
 	broken := false
 	for {
 		q.mu.Lock()
+		if fz := q.fz; fz != nil && !q.closed {
+			q.mu.Unlock()
+			fz.parkWriter()
+			if fz.abandoned.Load() {
+				return
+			}
+			continue
+		}
 		bufs, closed := q.bufs, q.closed
 		q.bufs = nil
 		q.mu.Unlock()
@@ -97,9 +127,22 @@ func (p *Pane) write() {
 			<-q.wake
 			continue
 		}
-		for _, b := range bufs {
+		for i, b := range bufs {
 			if !broken {
-				if _, err := p.master.Write(b); err != nil {
+				n, err := p.master.Write(b)
+				if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+					// Only Freeze sets a deadline, and it is no failure of
+					// the terminal: the rest goes back to the front of the
+					// queue, whether the freeze still holds (the writer
+					// parks) or a Thaw already ended it (the writer goes
+					// on, the deadline is gone).
+					q.unwrite(n, append([][]byte{b[n:]}, bufs[i+1:]...))
+					if !q.frozen() {
+						time.Sleep(time.Millisecond)
+					}
+					break
+				}
+				if err != nil {
 					broken = true
 				}
 			}
@@ -114,16 +157,47 @@ func (p *Pane) write() {
 	}
 }
 
+// frozen reports whether Freeze stopped the writer.
+func (q *outQueue) frozen() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.fz != nil
+}
+
+// unwrite puts back what a write interrupted by Freeze did not write, in
+// front of the queue; written bytes of it leave the size.
+func (q *outQueue) unwrite(written int, rest [][]byte) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.size -= written
+	keep := make([][]byte, 0, len(rest)+len(q.bufs))
+	for _, b := range rest {
+		if len(b) > 0 {
+			keep = append(keep, b)
+		}
+	}
+	q.bufs = append(keep, q.bufs...)
+}
+
 // wait is the waiter: it waits until the child ended, reaps it under the
 // lock that signal takes, and reports the exit once the reader saw the end
 // of file or eofWait passed, so the last output is parsed before the exit
 // is reported (3.2.1).
+//
+// The exit is computed under the lock and kept (waitStatus), so a freeze
+// for a live upgrade, which holds the lock, knows it exactly. A pane
+// abandoned after a live upgrade in the same process leaves the child to
+// the pane that adopted it.
 func (p *Pane) wait() {
 	defer close(p.waiterDone)
 	waitExited(p.pid)
 	var ws unix.WaitStatus
 	var err error
 	p.procMu.Lock()
+	if p.abandoned {
+		p.procMu.Unlock()
+		return
+	}
 	for {
 		_, err = unix.Wait4(p.pid, &ws, 0, nil)
 		if err != unix.EINTR {
@@ -131,11 +205,7 @@ func (p *Pane) wait() {
 		}
 	}
 	p.reaped = true
-	byServer := p.closing.Load()
-	p.procMu.Unlock()
-	close(p.reapedc)
-
-	ex := Exit{ByServer: byServer}
+	ex := Exit{ByServer: p.closing.Load()}
 	switch {
 	case err != nil:
 		ex.Code, ex.Text = -1, "wait: "+err.Error()
@@ -144,6 +214,15 @@ func (p *Pane) wait() {
 	default:
 		ex.Code = ws.ExitStatus()
 	}
+	p.waitStatus = &ex
+	p.procMu.Unlock()
+	close(p.reapedc)
+	p.reportExit(ex)
+}
+
+// reportExit hands the exit to the actor once the reader saw the end of
+// file or eofWait passed.
+func (p *Pane) reportExit(ex Exit) {
 	t := time.NewTimer(eofWait)
 	select {
 	case <-p.readerDone:

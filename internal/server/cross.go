@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -520,4 +523,35 @@ func notifyAgent(core Core, state *proto.State, p proto.Pane, a agent.State) {
 			c.Send(m)
 		}
 	}
+}
+
+// agentsExt is the name of the agent trackers' state in a handover payload.
+const agentsExt = "agents"
+
+// SaveHandover carries the agent trackers across a live upgrade: their
+// statuses, pending changes and times, so an agent keeps its status and no
+// bell rings again. What is known of the conversations (resumes) is found
+// again by the next poll.
+func (agentObserver) SaveHandover(core Core) (string, json.RawMessage, error) {
+	b, err := json.Marshal(stateOf(core).agents.Export())
+	return agentsExt, b, err
+}
+
+// StageHandover reads the trackers of SaveHandover; the returned apply
+// installs them and arms their timer.
+func (agentObserver) StageHandover(core Core, name string, data json.RawMessage) (func(), error) {
+	if name != agentsExt {
+		return nil, fmt.Errorf("unknown extension state %q", name)
+	}
+	var m map[string]agent.TrackerState
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&m); err != nil {
+		return nil, err
+	}
+	return func() {
+		st := stateOf(core)
+		st.agents.Import(m)
+		core.Post(func(core Core) { st.tick(core) })
+	}, nil
 }

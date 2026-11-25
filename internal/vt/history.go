@@ -193,6 +193,25 @@ func (s *historyState) init(t *term) {
 	s.plant(t, 0)
 }
 
+// restore is init for a terminal restored from a snapshot (Restore): the
+// numbers continue at first and base. The anchor is planted when the
+// primary screen is active; on the alternate screen it cannot be (the
+// library places points on the active screen only), and it stays without a
+// value: the first sync that sees the primary screen again finds no anchor
+// and renumbers the history above every number handed out (lose), telling
+// OnReflow that no followed line can be placed. A number a client held is
+// then never silently wrong.
+func (s *historyState) restore(t *term, first, base int64) {
+	s.follows = map[int64][]C.GhosttyTrackedGridRef{}
+	s.rows = t.rows
+	s.first, s.base = first, base
+	s.anchorAbs = base
+	if t.h == nil || t.altActive() {
+		return
+	}
+	s.plant(t, base)
+}
+
 // plant puts the anchor on the top row of the live screen with the number
 // abs and the sentinel on the newest history row, if there is one. The
 // primary screen must be active.

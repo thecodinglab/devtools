@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"devtools/internal/platform"
 	"devtools/internal/proto"
 	"devtools/internal/proto/prototest"
 	"devtools/internal/testkit"
@@ -72,7 +73,11 @@ func (r *installRig) askedCount() int {
 }
 
 func (r *installRig) options(o *Options) {
-	o.Program, o.Executable = r.program, r.running
+	self, err := platform.FileIdentity(r.running)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	o.Program, o.Self = r.program, self
 	o.UpdateInterval = 20 * time.Millisecond
 	o.InstalledVersion = func(ctx context.Context, path string) (string, error) {
 		r.mu.Lock()

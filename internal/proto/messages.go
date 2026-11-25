@@ -171,6 +171,8 @@ type Welcome struct {
 	// installed build did not say its version; absent when none waits. A
 	// receiver that does not know the field ignores it (CapUpdate).
 	Installed string `json:"installed,omitempty"`
+	// Upgraded is the last live upgrade of the server's process (CapUpgrade).
+	Upgraded *Upgraded `json:"upgraded,omitempty"`
 }
 
 // Refuse refuses a hello; the server closes the connection after it.

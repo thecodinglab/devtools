@@ -42,7 +42,10 @@ func denied(name string) bool {
 	case "TMUX", "TMUX_PANE", "STY", "CLAUDECODE", "KITTY_WINDOW_ID", "GHOSTTY_RESOURCES_DIR":
 		return true
 	}
-	return strings.HasPrefix(name, "ZELLIJ") || strings.HasPrefix(name, "HERDR_")
+	// The descriptor inventory of a live upgrade (internal/handover) and
+	// the knobs of its tests are the server's own; boot removes the first
+	// from its environment, and no pane carries any of them.
+	return strings.HasPrefix(name, "ZELLIJ") || strings.HasPrefix(name, "HERDR_") || strings.HasPrefix(name, "DEVTOOLS_HANDOVER") || strings.HasPrefix(name, "DEVTOOLS_UPGRADE_")
 }
 
 // validName reports whether name can be the name of an environment entry.

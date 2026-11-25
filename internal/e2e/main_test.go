@@ -154,16 +154,24 @@ func run(m *testing.M) (int, error) {
 	if err := setBinary(bin); err != nil {
 		return 1, err
 	}
+	// The second build of the live upgrade tests: the same source with
+	// another version stamp, a file of its own.
+	v2 := filepath.Join(dir, "v2", devtools)
+	if err := build(v2, "-ldflags", "-X devtools/internal/cli.buildVersion="+versionV2); err != nil {
+		return 1, err
+	}
+	binaryV2 = v2
 	return m.Run(), nil
 }
 
 // build builds ./cmd/devtools of this checkout into out.
-func build(out string) error {
+func build(out string, flags ...string) error {
 	root, err := moduleRoot()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/devtools")
+	args := append([]string{"build"}, flags...)
+	cmd := exec.Command("go", append(args, "-o", out, "./cmd/devtools")...)
 	cmd.Dir = root
 	cmd.Env = os.Environ()
 	if b, err := cmd.CombinedOutput(); err != nil {

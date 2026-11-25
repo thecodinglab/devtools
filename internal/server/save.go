@@ -61,7 +61,7 @@ func (s *Server) saver() {
 		select {
 		case st := <-s.saves:
 			s.saveMu.Lock()
-			if !s.saveDone {
+			if !s.saveDone && !s.savePaused {
 				if err := persist.Save(s.statePath(), st); err != nil {
 					s.log.Error("saving the state failed", "file", s.statePath(), "err", err)
 				}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"devtools/internal/pane"
+	"devtools/internal/platform"
 	"devtools/internal/vt"
 )
 
@@ -35,24 +36,46 @@ type Options struct {
 	ProcInterval  time.Duration // 1 s
 	FgInterval    time.Duration // 100 ms: foreground group of the focused pane of a displayed tab (3.2.1)
 
-	// The installed update (update.go). Program is the path the service
-	// starts the server through, the devtools of the profile, a symlink;
-	// Executable is the file of the running image, as the kernel names it
-	// (platform.RunningExecutable), never the symlink it was started by.
-	// Either "" watches nothing.
-	// InstalledVersion asks the build at a path for its version; nil runs
-	// "<path> version".
-	Program          string
-	Executable       string
+	// The running build and the installed one (update.go, upgrade.go).
+	// Program is the path the server was started as (argv[0], made
+	// absolute): the devtools of the profile, a symlink that follows the
+	// active generation. Self is the file of the running image as the
+	// kernel names it (platform.SelfExecutable), never the symlink it was
+	// started by; a live upgrade starts the new image with its own. Without
+	// Program or Self nothing is watched.
+	Program string
+	Self    platform.Identity
+	// The watch of the installed build (update.go) resolves Program once
+	// per UpdateInterval. InstalledVersion asks the build at a path for its
+	// version; nil runs "<path> version".
 	UpdateInterval   time.Duration // 10 s
 	InstalledVersion func(ctx context.Context, path string) (string, error)
 
 	NewPane func(pane.Options) Pane // nil: pane.Start; tests of the core pass a fake
 	Log     *slog.Logger
+
+	// The live upgrade (upgrade.go, internal/handover). Without Exec or
+	// Program the server cannot upgrade itself and does not announce
+	// CapUpgrade.
+	Exec func(*Handover) error
+	// Check runs the installed build's upgrade-check; nil: platform.RunCheck
+	// with Env.
+	Check func(ctx context.Context, path string, args []string) ([]byte, error)
+	// The automatic upgrade (autoupgrade.go): off unless AutoUpgrade. It
+	// takes its candidate from the watch of the installed build.
+	AutoUpgrade     bool
+	UpgradeSettle   time.Duration          // 30 s: how long a new build must stay before it is taken
+	UpgradeIdle     time.Duration          // 3 s without input on any window
+	UpgradeEvery    time.Duration          // 10 min: at most one automatic attempt per this
+	UpgradeTargetOK func(path string) bool // nil: only /nix/store paths
+	// Force makes server.upgrade go ahead with the running build itself
+	// (tests); a request's force needs it too.
+	UpgradeForce bool
 }
 
 // Defaults returns the production values of 5.3.6. StateDir, Shell, Env,
-// Version, Host, Program, Executable, InstalledVersion, NewPane and Log stay zero: the caller (boot.Run) fills them.
+// Version, Host, Program, Self, InstalledVersion, NewPane, Log, Exec and
+// Check stay zero: the caller (boot.Run) fills them.
 func Defaults() Options {
 	return Options{
 		History:       10000,
@@ -68,6 +91,9 @@ func Defaults() Options {
 		FgInterval:    100 * time.Millisecond,
 
 		UpdateInterval: 10 * time.Second,
+		UpgradeSettle:  30 * time.Second,
+		UpgradeIdle:    3 * time.Second,
+		UpgradeEvery:   10 * time.Minute,
 	}
 }
 
@@ -88,6 +114,10 @@ type Pane interface {
 	Info() pane.Info
 	Watch(wake func()) (cancel func())
 	Close()
+	// The live upgrade (pane/handover.go).
+	Freeze(ctx context.Context) (pane.Frozen, error)
+	Thaw()
+	Abandon()
 }
 
 var _ Pane = (*pane.Pane)(nil)

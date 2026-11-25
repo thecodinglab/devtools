@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,14 +15,21 @@ import (
 // active generation, so an update changes where it points and not the
 // running server. Once per UpdateInterval the watch resolves that path
 // (Options.Program) and compares the file it names with the running image
-// (Options.Executable, which boot takes from the kernel and not from the
-// symlink, platform.RunningExecutable). Another file is another build,
-// which waits for a restart: the watch asks it its version ("<path>
-// version", bounded by versionLimit) for a label, and welcome.installed
-// says it to every new connection and event.update to the connected ones
-// that have CapUpdate. A label equal to this build's version (two dirty
-// builds of one commit print the same stamp) or none is installedUnknown.
-// The answer is asked again only when the path changes again.
+// (Options.Self, which boot takes from the kernel and not from the
+// symlink, platform.SelfExecutable). Another file is another build, which
+// waits for a restart: the watch asks it its version ("<path> version",
+// bounded by versionLimit) for a label, and welcome.installed says it to
+// every new connection and event.update to the connected ones that have
+// CapUpdate. A label equal to this build's version (two dirty builds of
+// one commit print the same stamp) or none is installedUnknown. The answer
+// is asked again only when Program names another file again.
+//
+// The same look feeds the automatic upgrade (autoupgrade.go): what the
+// watch found installed is its candidate, so the build the windows are
+// told about and the build the server upgrades to are decided once, by
+// the same file identity. A live upgrade starts the new image with a new
+// server whose Self is the new file: it begins with nothing installed, so
+// the windows that reconnect lose ↑ update at once.
 
 // versionLimit bounds "<path> version".
 const versionLimit = 3 * time.Second
@@ -38,14 +43,10 @@ const maxInstalled = 64
 const installedUnknown = "unknown"
 
 // watchInstall runs the watch until the server ends. Without a Program or
-// an Executable it watches nothing.
+// the identity of the running image it watches nothing.
 func (s *Server) watchInstall() {
 	defer s.wg.Done()
-	if s.o.Program == "" || s.o.Executable == "" {
-		return
-	}
-	self, err := os.Stat(s.o.Executable)
-	if err != nil {
+	if s.o.Program == "" || s.o.Self.Path == "" {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,7 +55,8 @@ func (s *Server) watchInstall() {
 		<-s.quit
 		cancel()
 	}()
-	last := "" // what Program resolved to when the installed build was last decided
+	auto := s.newAutoUpgrade()
+	var last *platform.Identity // the file Program named when the installed build was last decided
 	t := time.NewTicker(s.o.UpdateInterval)
 	defer t.Stop()
 	for {
@@ -63,25 +65,35 @@ func (s *Server) watchInstall() {
 		case <-s.quit:
 			return
 		}
-		resolved, err := filepath.EvalSymlinks(s.o.Program)
-		if err != nil || resolved == last {
-			// a profile in the middle of a switch: looked at again next time
-			continue
+		id, err := platform.FileIdentity(s.o.Program)
+		found := installedCandidate(s.o.Program, id, err, s.o.Self)
+		// a profile in the middle of a switch keeps what was decided: it is
+		// looked at again next time
+		if err == nil && (last == nil || !sameCandidate(*last, id)) {
+			last = &id
+			installed := ""
+			if found != nil {
+				installed = s.installedVersion(ctx, id.Path)
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			s.postSoon(func(c *core) { c.setInstalled(installed) })
 		}
-		fi, err := os.Stat(resolved)
-		if err != nil {
-			continue
+		if auto != nil {
+			auto.look(found)
 		}
-		last = resolved
-		installed := ""
-		if !os.SameFile(fi, self) {
-			installed = s.installedVersion(ctx, resolved)
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		s.postSoon(func(c *core) { c.setInstalled(installed) })
 	}
+}
+
+// installedCandidate is what one look of the watch found: the build behind
+// program when it is another file than the running image self, with the
+// identity it has now; nil when it is the running one or cannot be read.
+func installedCandidate(program string, id platform.Identity, err error, self platform.Identity) *candidate {
+	if err != nil || id.Same(self) {
+		return nil
+	}
+	return &candidate{program: program, id: id}
 }
 
 // installedVersion asks the build at path, another file than the running

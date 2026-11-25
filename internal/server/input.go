@@ -54,6 +54,13 @@ func hasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }
 // that is not displayed on cn is dropped, so input never reaches a pane the
 // client cannot see.
 func (s *Server) input(cn *conn, m proto.Msg) {
+	// The gate of a live upgrade: after the handover closed it no input
+	// reaches a pane (upgrade.go).
+	s.inputMu.RLock()
+	defer s.inputMu.RUnlock()
+	if s.gated {
+		return
+	}
 	if m.T == proto.TypeInputFocus {
 		var q proto.Focus
 		if m.Decode(&q) == nil {
@@ -163,6 +170,7 @@ func (s *Server) paste(cn *conn, h *handle, q proto.Paste) {
 	} else {
 		delete(cn.pasting, h.id)
 	}
+	cn.pasteOpen.Store(len(cn.pasting) > 0)
 	p.Paste(text, first, !q.More)
 }
 

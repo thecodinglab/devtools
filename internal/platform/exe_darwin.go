@@ -33,3 +33,7 @@ func runningExecutable() string {
 	}
 	return string(buf[:n])
 }
+
+// runningImage tells nothing more on Darwin: PROC_PIDPATHINFO already names
+// the vnode of the running image.
+func runningImage() (dev, ino uint64, ok bool) { return 0, 0, false }

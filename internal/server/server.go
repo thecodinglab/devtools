@@ -49,8 +49,20 @@ type Server struct {
 	stopped  chan struct{} // closed when the stop is complete
 	endOnce  sync.Once     // closes quit
 
-	saveMu   sync.Mutex // one write of state.json at a time
-	saveDone bool       // the synchronous save of the stop was written (guarded by saveMu)
+	saveMu     sync.Mutex // one write of state.json at a time
+	saveDone   bool       // the synchronous save of the stop was written (guarded by saveMu)
+	savePaused bool       // a live upgrade holds the saver (guarded by saveMu)
+
+	// The live upgrade (upgrade.go). hmail is the mailbox the loop takes
+	// from while it holds the model for a handover (core.hold); inputMu is
+	// the gate of the input path: a reader applies input under its read
+	// lock, the handover closes the gate under the write lock.
+	hmail   chan func(*core)
+	inputMu sync.RWMutex
+	gated   bool // guarded by inputMu
+	up      upgradeState
+	paused  atomic.Bool   // Accept is paused for a handover
+	resumed chan struct{} // closed when the pause ends (guarded by mu)
 
 	wg sync.WaitGroup // the loop, the saver, the scan's ticker, the watch of the installed build, every connection's goroutines
 }
@@ -61,18 +73,7 @@ type Server struct {
 // loop and the saver run from here on; Serve accepts connections.
 func New(o Options) (*Server, error) {
 	o = withDefaults(o)
-	s := &Server{
-		o:       o,
-		log:     o.Log,
-		boot:    newBoot(),
-		mail:    make(chan func(*core), mailboxSize),
-		quit:    make(chan struct{}),
-		saves:   make(chan persist.State, 1),
-		live:    map[Pane]bool{},
-		conns:   map[*conn]bool{},
-		stopped: make(chan struct{}),
-	}
-	s.socket.Store("")
+	s := newServer(o, newBoot())
 	st := persist.Empty()
 	if o.StateDir != "" {
 		loaded, err := persist.Load(s.statePath())
@@ -86,12 +87,37 @@ func New(o Options) (*Server, error) {
 		st = loaded
 	}
 	s.core = newCore(s, model.Load(st))
+	s.start()
+	return s, nil
+}
+
+// newServer is the server of New and of an adoption (adopt.go), without its
+// core and its goroutines.
+func newServer(o Options, boot string) *Server {
+	s := &Server{
+		o:       o,
+		log:     o.Log,
+		boot:    boot,
+		mail:    make(chan func(*core), mailboxSize),
+		hmail:   make(chan func(*core), 16),
+		quit:    make(chan struct{}),
+		saves:   make(chan persist.State, 1),
+		live:    map[Pane]bool{},
+		conns:   map[*conn]bool{},
+		stopped: make(chan struct{}),
+	}
+	s.socket.Store("")
+	return s
+}
+
+// start runs the loop, the saver, the scan's ticker and the watch of the
+// installed build.
+func (s *Server) start() {
 	s.wg.Add(4)
 	go s.loop()
 	go s.saver()
 	go s.ticker()
 	go s.watchInstall()
-	return s, nil
 }
 
 // withDefaults fills every zero field of o that has a production value.
@@ -117,6 +143,14 @@ func withDefaults(o Options) Options {
 	}
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
+	}
+	for _, f := range []struct{ v, def *time.Duration }{
+		{&o.UpgradeSettle, &d.UpgradeSettle}, {&o.UpgradeIdle, &d.UpgradeIdle},
+		{&o.UpgradeEvery, &d.UpgradeEvery},
+	} {
+		if *f.v <= 0 {
+			*f.v = *f.def
+		}
 	}
 	return o
 }
@@ -165,6 +199,14 @@ func (s *Server) Serve(l net.Listener) error {
 			if s.stopping.Load() {
 				<-s.stopped
 				return nil
+			}
+			if s.paused.Load() {
+				// A handover paused the accepting: connections wait in the
+				// listen backlog for the new image, or for the resume.
+				if !s.waitResumed() {
+					return nil
+				}
+				continue
 			}
 			if errors.Is(err, net.ErrClosed) {
 				return fmt.Errorf("server: accept: %w", err)
@@ -241,3 +283,14 @@ func (s *Server) untrack(p Pane) {
 // pid is welcome.pid; a variable so that nothing else of the process is
 // read in the handshake.
 var pid = os.Getpid
+
+// Listener is the listener Serve accepts on; for the in-process upgrade of
+// the tests (servertest).
+func (s *Server) Listener() (*net.UnixListener, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ul, ok := s.ln.(*net.UnixListener); ok {
+		return ul, nil
+	}
+	return nil, errors.New("server: not serving on a unix listener")
+}

@@ -17,9 +17,14 @@ type actor struct {
 	term vt.Term
 
 	exited      bool
-	spawnFailed bool
+	spawnFailed bool // or restored exited: Exited is reported once at the start
 	notifiedFg  int
 	sizeGen     uint64
+
+	// frozen for a live upgrade (handover.go): no input, no exit report,
+	// and resizes wait for Thaw.
+	frozen      bool
+	resizeLater bool
 
 	// recorded by the callbacks during one Write or Resize
 	events   []Event
@@ -46,8 +51,15 @@ type snapReq struct {
 
 func newActor(p *Pane) *actor {
 	a := &actor{p: p}
-	o := p.o
-	a.term = vt.New(vt.Options{
+	a.term = vt.New(a.options())
+	return a
+}
+
+// options are the terminal options of the pane, with the callbacks that
+// record into the actor.
+func (a *actor) options() vt.Options {
+	o := a.p.o
+	return vt.Options{
 		Cols:    o.Cols,
 		Rows:    o.Rows,
 		History: o.History,
@@ -71,8 +83,7 @@ func newActor(p *Pane) *actor {
 			a.recorded = true
 		},
 		OnReflow: o.OnReflow,
-	})
-	return a
+	}
 }
 
 // run is the actor's loop. It is the only caller of the terminal.
@@ -91,8 +102,12 @@ func (a *actor) run() {
 	}
 	for {
 		var in chan input
-		if !a.exited && !p.out.full() {
+		if !a.exited && !a.frozen && !p.out.full() {
 			in = p.in
+		}
+		exitc := p.exitc
+		if a.frozen {
+			exitc = nil
 		}
 		select {
 		case b := <-p.chunks:
@@ -105,7 +120,7 @@ func (a *actor) run() {
 			for _, op := range p.ops.take() {
 				op(a)
 			}
-		case ex := <-p.exitc:
+		case ex := <-exitc:
 			// A chunk the reader already holds is output from before the
 			// exit report: it is parsed first. Bounded, because a process
 			// the child left behind may keep writing.
@@ -218,6 +233,10 @@ func (a *actor) resize() {
 	cols, rows, gen := p.size[0], p.size[1], p.sizeGen
 	p.mu.Unlock()
 	if gen == a.sizeGen {
+		return
+	}
+	if a.frozen {
+		a.resizeLater = true
 		return
 	}
 	a.sizeGen = gen
